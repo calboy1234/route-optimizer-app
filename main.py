@@ -77,7 +77,7 @@ def solve_tsp_open(duration_matrix):
     expanded_matrix.append([0] * num_total_nodes)
 
     # 2. Setup OR-Tools (Starts at 0, Ends at the Dummy Node)
-    manager = pywrapcp.IndexManager(num_total_nodes, 1, [0], [num_real_nodes])
+    manager = pywrapcp.RoutingIndexManager(num_total_nodes, 1, [0], [num_real_nodes])
     routing = pywrapcp.RoutingModel(manager)
 
     def distance_callback(from_index, to_index):
