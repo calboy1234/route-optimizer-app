@@ -2,7 +2,7 @@ import os
 import requests
 
 # This looks for a variable called OSRM_URL.
-OSRM_URL = os.getenv("OSRM_URL", "")
+OSRM_URL = os.getenv("OSRM_URL")
 
 def test_osrm():
     coords = "-97.1384,49.8951;-97.1500,49.9000"
