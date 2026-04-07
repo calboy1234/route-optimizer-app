@@ -73,6 +73,18 @@
     <div class="flex-1 relative h-full overflow-hidden">
         <div id="map"></div>
 
+        <div class="absolute bottom-4 left-4 z-[1000] bg-white/95 backdrop-blur rounded-xl border border-slate-200 shadow-lg px-3 py-2 space-y-2">
+            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Map Overlays</p>
+            <label class="flex items-center gap-2 text-xs text-slate-700">
+                <input id="toggleRouteLine" type="checkbox" class="rounded border-slate-300 text-blue-600" checked>
+                <span>Blue route line</span>
+            </label>
+            <label class="flex items-center gap-2 text-xs text-slate-700">
+                <input id="toggleSnapGuides" type="checkbox" class="rounded border-slate-300 text-red-600" checked>
+                <span>Red snap guides</span>
+            </label>
+        </div>
+
         <div id="placementHint" class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] hidden">
             <div class="bg-slate-900 text-white px-4 py-2 rounded-full shadow-xl text-sm font-medium">
                 Click anywhere on the map to place the next waypoint.
@@ -144,6 +156,8 @@
         let lastFocusedBounds = null;
         let draggedRouteKey = null;
         let isSidebarCollapsed = false;
+        let showRouteLine = true;
+        let showSnapGuides = true;
 
         const addModeBtn = document.getElementById('btnAddMode');
         const sidebar = document.getElementById('sidebar');
@@ -151,11 +165,14 @@
         const sidebarToggleIcon = document.getElementById('sidebarToggleIcon');
         const pointContainer = document.getElementById('pointContainer');
         const optimizeBtn = document.getElementById('btnOptimize');
+        const toggleRouteLine = document.getElementById('toggleRouteLine');
+        const toggleSnapGuides = document.getElementById('toggleSnapGuides');
         const placementHint = document.getElementById('placementHint');
         const resultPanel = document.getElementById('resultPanel');
         const panelToggle = document.getElementById('panelToggle');
         const cursorVertical = document.getElementById('cursorVertical');
         const cursorHorizontal = document.getElementById('cursorHorizontal');
+        const markerLookup = new Map();
 
         const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxNativeZoom: 19,
@@ -355,7 +372,7 @@
 
         function drawOptimizedRoute(routePoints) {
             clearRouteLine();
-            if (routePoints.length < 2) {
+            if (!showRouteLine || routePoints.length < 2) {
                 return;
             }
 
@@ -372,6 +389,9 @@
 
         function drawSnapLines() {
             clearSnapLines();
+            if (!showSnapGuides) {
+                return;
+            }
             points.forEach((point) => {
                 if (!point.snapped) {
                     return;
@@ -418,7 +438,8 @@
                 return;
             }
 
-            row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            const targetTop = Math.max(row.offsetTop - 24, 0);
+            pointContainer.scrollTo({ top: targetTop, behavior: 'smooth' });
             row.classList.add('ring-2', 'ring-blue-400', 'bg-blue-50');
 
             if (sidebarHighlightTimeout) {
@@ -446,17 +467,22 @@
             }
 
             map.flyTo([point.lat, point.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
+            const marker = markerLookup.get(routeKey);
+            if (marker) {
+                setTimeout(() => marker.openPopup(), 200);
+            }
         }
 
         function handleFocusWaypoint(routeKey) {
-            if (isSidebarCollapsed) {
+            const needsExpand = isSidebarCollapsed;
+            if (needsExpand) {
                 setSidebarCollapsed(false);
             }
 
             focusPointByRouteKey(routeKey);
             setTimeout(() => {
                 highlightSidebarPoint(routeKey);
-            }, isSidebarCollapsed ? 240 : 0);
+            }, needsExpand ? 260 : 0);
         }
 
         function reorderPointsByRouteKey(movedRouteKey, targetRouteKey) {
@@ -508,7 +534,7 @@
                 document.getElementById('snapWarningList').innerHTML = snapWarnings
                     .sort((a, b) => b.distanceMeters - a.distanceMeters)
                     .map((point) => `
-                        <button type="button" onclick="focusWaypointEntry('${point.routeKey}')" class="block w-full text-left rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5 hover:border-amber-300 hover:bg-white">
+                        <button type="button" onclick="window.focusWaypointEntry('${point.routeKey}')" class="block w-full text-left rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5 hover:border-amber-300 hover:bg-white">
                             <div class="text-[11px] font-semibold text-amber-900 break-words">${escapeHtml(point.id)}</div>
                             <div class="text-[11px] text-amber-800">${Math.round(point.distanceMeters)} m from snapped road point</div>
                         </button>
@@ -653,6 +679,7 @@
         function renderUI() {
             optimizeBtn.disabled = points.length < 2;
             pointContainer.innerHTML = '';
+            markerLookup.clear();
 
             markers.forEach((marker) => map.removeLayer(marker));
             markers = [];
@@ -715,7 +742,7 @@
                     <div class="min-w-[150px]">
                         <div class="font-semibold">${escapeHtml(point.id)}</div>
                         <div class="text-[11px] text-slate-500">${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}</div>
-                        <button onclick="jumpToSidebarPoint('${point.routeKey}')" class="mt-2 px-2 py-1 text-[11px] rounded border border-slate-300 text-slate-700 hover:border-blue-300 hover:text-blue-700">
+                        <button onclick="window.jumpToSidebarPoint('${point.routeKey}')" class="mt-2 px-2 py-1 text-[11px] rounded border border-slate-300 text-slate-700 hover:border-blue-300 hover:text-blue-700">
                             Jump to sidebar
                         </button>
                     </div>
@@ -728,6 +755,7 @@
                     renderUI();
                 });
                 markers.push(marker);
+                markerLookup.set(point.routeKey, marker);
             });
         }
 
@@ -748,6 +776,16 @@
 
         sidebarToggle.addEventListener('click', () => {
             setSidebarCollapsed(!isSidebarCollapsed);
+        });
+
+        toggleRouteLine.addEventListener('change', () => {
+            showRouteLine = toggleRouteLine.checked;
+            drawOptimizedRoute(optimizedRoute);
+        });
+
+        toggleSnapGuides.addEventListener('change', () => {
+            showSnapGuides = toggleSnapGuides.checked;
+            drawSnapLines();
         });
 
         map.on('mousemove', (event) => {
