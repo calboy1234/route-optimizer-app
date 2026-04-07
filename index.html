@@ -10,8 +10,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         #map { height: 100%; width: 100%; z-index: 1; }
-        .compact-input { padding: 4px 6px; font-size: 11px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; line-height: 1.2; }
+        .compact-input { padding: 3px 5px; font-size: 10px; border: 1px solid #d1d5db; border-radius: 5px; background: #fff; line-height: 1.15; }
         .compact-input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+        .sidebar-drop-target { border-color: #60a5fa !important; background: #eff6ff !important; }
+        .leaflet-bar button.map-home-btn { width: 30px; height: 30px; line-height: 30px; display: block; background: white; color: #0f172a; font-weight: 700; font-size: 14px; }
+        .leaflet-bar button.map-home-btn:hover { background: #eff6ff; color: #2563eb; }
     </style>
 </head>
 <body class="bg-slate-100 h-screen flex overflow-hidden text-slate-800">
@@ -90,17 +93,20 @@
     </div>
 
     <script>
-        const map = L.map('map').setView([49.8951, -97.1384], 12);
+        const map = L.map('map', { maxZoom: 22 }).setView([49.8951, -97.1384], 12);
 
         let points = [];
         let markers = [];
         let optimizedRoute = [];
         let routeLine = null;
         let snapLines = [];
+        let snapDots = [];
         let isPlacementMode = false;
         let nextPointKey = 1;
         let hasSummary = false;
         let sidebarHighlightTimeout = null;
+        let lastFocusedBounds = null;
+        let draggedRouteKey = null;
 
         const addModeBtn = document.getElementById('btnAddMode');
         const pointContainer = document.getElementById('pointContainer');
@@ -112,6 +118,7 @@
         const cursorHorizontal = document.getElementById('cursorHorizontal');
 
         const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 22,
             attribution: '&copy; OpenStreetMap contributors'
         });
         const lightLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
@@ -120,10 +127,11 @@
             attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
         });
         const topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-            maxZoom: 17,
+            maxZoom: 20,
             attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap'
         });
         const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 22,
             attribution: 'Tiles &copy; Esri'
         });
 
@@ -138,6 +146,24 @@
             {},
             { position: 'bottomright', collapsed: true }
         ).addTo(map);
+
+        const HomeControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd() {
+                const container = L.DomUtil.create('div', 'leaflet-bar');
+                const button = L.DomUtil.create('button', 'map-home-btn', container);
+                button.type = 'button';
+                button.title = 'Reset map view';
+                button.innerHTML = 'H';
+                L.DomEvent.disableClickPropagation(container);
+                L.DomEvent.on(button, 'click', (event) => {
+                    L.DomEvent.stop(event);
+                    resetMapView();
+                });
+                return container;
+            }
+        });
+        map.addControl(new HomeControl());
 
         function roundCoord(value) {
             return parseFloat(Number(value).toFixed(6));
@@ -176,11 +202,32 @@
 
             const latLngs = targetPoints.map((point) => [point.lat, point.lng]);
             if (latLngs.length === 1) {
+                lastFocusedBounds = L.latLngBounds(latLngs, latLngs);
                 map.flyTo(latLngs[0], Math.max(map.getZoom(), 14), { duration: 0.6 });
                 return;
             }
 
+            lastFocusedBounds = L.latLngBounds(latLngs);
             map.fitBounds(latLngs, { padding: [48, 48] });
+        }
+
+        function resetMapView() {
+            if (routeLine) {
+                focusMapOnPoints(optimizedRoute.length ? optimizedRoute : points);
+                return;
+            }
+
+            if (lastFocusedBounds && lastFocusedBounds.isValid()) {
+                map.fitBounds(lastFocusedBounds, { padding: [48, 48] });
+                return;
+            }
+
+            if (points.length) {
+                focusMapOnPoints(points);
+                return;
+            }
+
+            map.setView([49.8951, -97.1384], 12);
         }
 
         function setResultPanelVisible(visible) {
@@ -198,6 +245,8 @@
         function clearSnapLines() {
             snapLines.forEach((line) => map.removeLayer(line));
             snapLines = [];
+            snapDots.forEach((dot) => map.removeLayer(dot));
+            snapDots = [];
         }
 
         function clearOptimizationState() {
@@ -264,6 +313,15 @@
                     }
                 ).addTo(map);
                 snapLines.push(line);
+
+                const dot = L.circleMarker([snappedLat, snappedLng], {
+                    radius: 4,
+                    color: '#b91c1c',
+                    weight: 2,
+                    fillColor: '#ef4444',
+                    fillOpacity: 1
+                }).addTo(map);
+                snapDots.push(dot);
             });
         }
 
@@ -283,7 +341,25 @@
             sidebarHighlightTimeout = setTimeout(() => {
                 row.classList.remove('ring-2', 'ring-blue-400', 'bg-blue-50');
                 sidebarHighlightTimeout = null;
-            }, 3000);
+            }, 1400);
+        }
+
+        function reorderPointsByRouteKey(movedRouteKey, targetRouteKey) {
+            if (!movedRouteKey || !targetRouteKey || movedRouteKey === targetRouteKey) {
+                return;
+            }
+
+            const fromIndex = points.findIndex((point) => point.routeKey === movedRouteKey);
+            const toIndex = points.findIndex((point) => point.routeKey === targetRouteKey);
+            if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+                return;
+            }
+
+            clearOptimizationState();
+            const [movedPoint] = points.splice(fromIndex, 1);
+            const insertionIndex = fromIndex < toIndex ? toIndex : toIndex;
+            points.splice(insertionIndex, 0, movedPoint);
+            renderUI();
         }
 
         function setPlacementMode(active) {
@@ -449,19 +525,44 @@
 
             points.forEach((point, index) => {
                 const row = document.createElement('div');
-                row.className = 'bg-white border border-slate-200 rounded-md px-2 py-1 shadow-sm hover:border-blue-200 hover:bg-blue-50/40 transition-colors';
+                row.className = 'bg-white border border-slate-200 rounded-md px-1.5 py-0.5 shadow-sm hover:border-blue-200 hover:bg-blue-50/40 transition-colors';
                 row.dataset.routeKey = point.routeKey;
+                row.draggable = true;
+
+                row.addEventListener('dragstart', () => {
+                    draggedRouteKey = point.routeKey;
+                    row.classList.add('opacity-60');
+                });
+                row.addEventListener('dragend', () => {
+                    draggedRouteKey = null;
+                    row.classList.remove('opacity-60');
+                    row.classList.remove('sidebar-drop-target');
+                });
+                row.addEventListener('dragover', (event) => {
+                    event.preventDefault();
+                    if (draggedRouteKey && draggedRouteKey !== point.routeKey) {
+                        row.classList.add('sidebar-drop-target');
+                    }
+                });
+                row.addEventListener('dragleave', () => {
+                    row.classList.remove('sidebar-drop-target');
+                });
+                row.addEventListener('drop', (event) => {
+                    event.preventDefault();
+                    row.classList.remove('sidebar-drop-target');
+                    reorderPointsByRouteKey(draggedRouteKey, point.routeKey);
+                });
 
                 row.innerHTML = `
-                    <div class="flex items-center gap-2">
-                        <div class="flex flex-col gap-1">
-                            <button onclick="movePoint(${index}, -1)" class="w-6 h-5 rounded border border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600 leading-none text-[10px]" aria-label="Move waypoint up">^</button>
-                            <button onclick="movePoint(${index}, 1)" class="w-6 h-5 rounded border border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600 leading-none text-[10px]" aria-label="Move waypoint down">v</button>
+                    <div class="flex items-center gap-1.5">
+                        <div class="flex flex-col items-center gap-0.5 text-slate-400 cursor-grab select-none" title="Drag to reorder">
+                            <span class="text-[8px] leading-none">::</span>
+                            <span class="text-[8px] leading-none">::</span>
                         </div>
-                        <div class="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
-                            <input type="text" value="${escapeHtml(point.id)}" onchange="updatePoint(${index}, 'id', this.value)" class="compact-input flex-[1_1_120px] min-w-[110px] font-semibold" placeholder="Waypoint name">
-                            <input type="text" value="${point.lat}" onchange="updatePoint(${index}, 'lat', this.value)" class="compact-input w-[96px] font-mono" aria-label="Latitude">
-                            <input type="text" value="${point.lng}" onchange="updatePoint(${index}, 'lng', this.value)" class="compact-input w-[96px] font-mono" aria-label="Longitude">
+                        <div class="flex-1 min-w-0 flex items-center gap-1 flex-wrap">
+                            <input type="text" value="${escapeHtml(point.id)}" onchange="updatePoint(${index}, 'id', this.value)" class="compact-input flex-[1_1_110px] min-w-[100px] font-semibold" placeholder="Waypoint name">
+                            <input type="text" value="${point.lat}" onchange="updatePoint(${index}, 'lat', this.value)" class="compact-input w-[92px] font-mono" aria-label="Latitude">
+                            <input type="text" value="${point.lng}" onchange="updatePoint(${index}, 'lng', this.value)" class="compact-input w-[92px] font-mono" aria-label="Longitude">
                         </div>
                         <div class="shrink-0">
                             <button onclick="deletePoint(${index})" class="text-[10px] text-slate-400 hover:text-red-600">Remove</button>
@@ -480,9 +581,6 @@
                         </button>
                     </div>
                 `);
-                marker.on('click', () => {
-                    highlightSidebarPoint(point.routeKey);
-                });
                 marker.on('dragend', (event) => {
                     clearOptimizationState();
                     const position = event.target.getLatLng();
@@ -614,7 +712,6 @@
                     drawSnapLines();
                     updateResultPanel(data.metrics, optimizedRoute);
                     renderUI();
-                    focusMapOnPoints(optimizedRoute);
                 }
             } catch (error) {
                 alert(error.message || 'Optimization failed.');
