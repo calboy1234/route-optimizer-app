@@ -59,7 +59,7 @@
             Show Summary
         </button>
 
-        <aside id="resultPanel" class="absolute top-16 right-4 z-[1001] hidden w-[320px] max-w-[calc(100%-2rem)] bg-white/95 backdrop-blur rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+        <aside id="resultPanel" class="absolute top-4 right-4 z-[1001] hidden w-[320px] max-w-[calc(100%-2rem)] bg-white/95 backdrop-blur rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-200 bg-slate-900 text-white flex items-start justify-between gap-3">
                 <div>
                     <h2 class="text-sm font-bold tracking-wide uppercase">Route Summary</h2>
@@ -78,6 +78,15 @@
                         <p class="text-[11px] uppercase tracking-wide text-slate-500">Time</p>
                         <p id="resTime" class="font-bold text-blue-700 text-lg">-</p>
                     </div>
+                </div>
+
+                <div id="snapWarning" class="hidden rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p class="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Snap Warning</p>
+                    <p id="snapWarningText" class="mt-1 text-xs text-amber-800"></p>
+                    <details id="snapWarningDetails" class="mt-2">
+                        <summary class="cursor-pointer text-[11px] font-medium text-amber-700">View affected waypoints</summary>
+                        <div id="snapWarningList" class="mt-2 space-y-1"></div>
+                    </details>
                 </div>
 
                 <div>
@@ -118,24 +127,28 @@
         const cursorHorizontal = document.getElementById('cursorHorizontal');
 
         const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxNativeZoom: 19,
             maxZoom: 22,
             attribution: '&copy; OpenStreetMap contributors'
         });
         const lightLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
             subdomains: 'abcd',
-            maxZoom: 20,
+            maxNativeZoom: 20,
+            maxZoom: 22,
             attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
         });
         const topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-            maxZoom: 20,
+            maxNativeZoom: 17,
+            maxZoom: 22,
             attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map style: &copy; OpenTopoMap'
         });
         const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxNativeZoom: 19,
             maxZoom: 22,
             attribution: 'Tiles &copy; Esri'
         });
 
-        streetLayer.addTo(map);
+        satelliteLayer.addTo(map);
         L.control.layers(
             {
                 Streets: streetLayer,
@@ -167,6 +180,45 @@
 
         function roundCoord(value) {
             return parseFloat(Number(value).toFixed(6));
+        }
+
+        function formatDuration(minutes) {
+            const totalMinutes = Number(minutes);
+            if (!Number.isFinite(totalMinutes)) {
+                return '-';
+            }
+
+            if (totalMinutes < 60) {
+                return `${totalMinutes} min`;
+            }
+
+            const roundedMinutes = Math.round(totalMinutes);
+            const hours = Math.floor(roundedMinutes / 60);
+            const mins = roundedMinutes % 60;
+            return mins === 0 ? `${hours} hr` : `${hours} hr ${mins} min`;
+        }
+
+        function getDistanceMeters(lat1, lng1, lat2, lng2) {
+            const toRadians = (degrees) => (degrees * Math.PI) / 180;
+            const earthRadiusMeters = 6371000;
+            const dLat = toRadians(lat2 - lat1);
+            const dLng = toRadians(lng2 - lng1);
+            const a =
+                Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * Math.sin(dLng / 2) ** 2;
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return earthRadiusMeters * c;
+        }
+
+        function getSnapWarnings() {
+            return points
+                .filter((point) => point.snapped && Number.isFinite(point.snapped.lat) && Number.isFinite(point.snapped.lng))
+                .map((point) => ({
+                    routeKey: point.routeKey,
+                    id: point.id,
+                    distanceMeters: getDistanceMeters(point.lat, point.lng, Number(point.snapped.lat), Number(point.snapped.lng))
+                }))
+                .filter((point) => point.distanceMeters > 30);
         }
 
         function sanitizeHeader(header) {
@@ -264,6 +316,10 @@
             document.getElementById('resTime').innerText = '-';
             document.getElementById('resCount').innerText = '0 waypoints';
             document.getElementById('resultStops').innerHTML = '';
+            document.getElementById('snapWarning').classList.add('hidden');
+            document.getElementById('snapWarningText').innerText = '';
+            document.getElementById('snapWarningList').innerHTML = '';
+            document.getElementById('snapWarningDetails').open = false;
         }
 
         function drawOptimizedRoute(routePoints) {
@@ -344,6 +400,15 @@
             }, 1400);
         }
 
+        function focusPointByRouteKey(routeKey) {
+            const point = points.find((entry) => entry.routeKey === routeKey);
+            if (!point) {
+                return;
+            }
+
+            map.flyTo([point.lat, point.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
+        }
+
         function reorderPointsByRouteKey(movedRouteKey, targetRouteKey) {
             if (!movedRouteKey || !targetRouteKey || movedRouteKey === targetRouteKey) {
                 return;
@@ -381,8 +446,32 @@
 
         function updateResultPanel(metrics, routePoints) {
             document.getElementById('resDist').innerText = metrics.distance_km + ' km';
-            document.getElementById('resTime').innerText = metrics.duration_minutes + ' min';
+            document.getElementById('resTime').innerText = formatDuration(metrics.duration_minutes);
             document.getElementById('resCount').innerText = routePoints.length + ' waypoints';
+            const snapWarnings = getSnapWarnings();
+            const snapWarningBox = document.getElementById('snapWarning');
+            const snapWarningText = document.getElementById('snapWarningText');
+
+            if (snapWarnings.length) {
+                const maxWarningDistance = Math.max(...snapWarnings.map((point) => point.distanceMeters));
+                snapWarningText.innerText = `${snapWarnings.length} waypoint${snapWarnings.length === 1 ? '' : 's'} snapped more than 30 m from the road point used for routing. Max offset: ${Math.round(maxWarningDistance)} m.`;
+                document.getElementById('snapWarningList').innerHTML = snapWarnings
+                    .sort((a, b) => b.distanceMeters - a.distanceMeters)
+                    .map((point) => `
+                        <button type="button" onclick="focusPointByRouteKey('${point.routeKey}')" class="block w-full text-left rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5 hover:border-amber-300 hover:bg-white">
+                            <div class="text-[11px] font-semibold text-amber-900 break-words">${escapeHtml(point.id)}</div>
+                            <div class="text-[11px] text-amber-800">${Math.round(point.distanceMeters)} m from snapped road point</div>
+                        </button>
+                    `)
+                    .join('');
+                snapWarningBox.classList.remove('hidden');
+            } else {
+                snapWarningBox.classList.add('hidden');
+                snapWarningText.innerText = '';
+                document.getElementById('snapWarningList').innerHTML = '';
+                document.getElementById('snapWarningDetails').open = false;
+            }
+
             document.getElementById('resultStops').innerHTML = routePoints.map((point, index) => `
                 <div class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                     <div class="w-7 h-7 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0">${index + 1}</div>
@@ -560,7 +649,7 @@
                             <span class="text-[8px] leading-none">::</span>
                         </div>
                         <div class="flex-1 min-w-0 flex items-center gap-1 flex-wrap">
-                            <input type="text" value="${escapeHtml(point.id)}" onchange="updatePoint(${index}, 'id', this.value)" class="compact-input flex-[1_1_110px] min-w-[100px] font-semibold" placeholder="Waypoint name">
+                            <input type="text" value="${escapeHtml(point.id)}" onchange="updatePoint(${index}, 'id', this.value)" class="compact-input flex-[1_1_74px] min-w-[68px] font-semibold" placeholder="Waypoint name">
                             <input type="text" value="${point.lat}" onchange="updatePoint(${index}, 'lat', this.value)" class="compact-input w-[92px] font-mono" aria-label="Latitude">
                             <input type="text" value="${point.lng}" onchange="updatePoint(${index}, 'lng', this.value)" class="compact-input w-[92px] font-mono" aria-label="Longitude">
                         </div>
@@ -666,6 +755,10 @@
 
         window.jumpToSidebarPoint = (routeKey) => {
             highlightSidebarPoint(routeKey);
+        };
+
+        window.focusPointByRouteKey = (routeKey) => {
+            focusPointByRouteKey(routeKey);
         };
 
         optimizeBtn.addEventListener('click', async function() {
