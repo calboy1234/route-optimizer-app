@@ -54,6 +54,8 @@
                 </div>
                 <div class="flex gap-2 shrink-0">
                     <button id="btnAddMode" class="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg text-xs font-bold transition">Add Waypoint</button>
+                    <button id="btnZoneMode" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-lg text-xs font-bold transition">Draw Inclusion Zone</button>
+                    <button id="btnClearZone" class="hidden bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-xs font-bold transition">Clear Zone</button>
                     <input type="file" id="fileInput" class="hidden" accept=".csv,text/csv">
                     <button onclick="document.getElementById('fileInput').click()" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-xs font-bold transition">Import</button>
                 </div>
@@ -63,6 +65,7 @@
         <div id="pointContainer" class="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50"></div>
 
         <div class="p-4 bg-white border-t border-slate-200 space-y-2">
+            <div id="zoneStatus" class="hidden rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"></div>
             <button id="btnOptimize" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 rounded-xl shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Run Optimization
             </button>
@@ -157,8 +160,15 @@
         let isSidebarCollapsed = false;
         let showRouteLine = true;
         let showSnapGuides = true;
+        let isZonePlacementMode = false;
+        let inclusionZoneVertices = [];
+        let inclusionZonePolygon = null;
+        let inclusionZoneDraft = null;
+        let includedRouteKeys = new Set();
 
         const addModeBtn = document.getElementById('btnAddMode');
+        const zoneModeBtn = document.getElementById('btnZoneMode');
+        const clearZoneBtn = document.getElementById('btnClearZone');
         const sidebar = document.getElementById('sidebar');
         const sidebarToggle = document.getElementById('sidebarToggle');
         const sidebarToggleIcon = document.getElementById('sidebarToggleIcon');
@@ -171,6 +181,7 @@
         const panelToggle = document.getElementById('panelToggle');
         const cursorVertical = document.getElementById('cursorVertical');
         const cursorHorizontal = document.getElementById('cursorHorizontal');
+        const zoneStatus = document.getElementById('zoneStatus');
         const markerLookup = new Map();
         const SIDEBAR_RESIZE_DELAY_MS = 220;
         const MAP_FOCUS_DURATION_SECONDS = 0.6;
@@ -261,6 +272,7 @@
 
         function getSnapWarnings() {
             return points
+                .filter((point) => isPointIncluded(point))
                 .filter((point) => point.snapped && Number.isFinite(point.snapped.lat) && Number.isFinite(point.snapped.lng))
                 .map((point) => ({
                     routeKey: point.routeKey,
@@ -307,6 +319,149 @@
             }
 
             return [point.lat, point.lng];
+        }
+
+        function pointInPolygon(lat, lng, vertices) {
+            if (!Array.isArray(vertices) || vertices.length < 3) {
+                return true;
+            }
+
+            let inside = false;
+            for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+                const xi = vertices[i].lng;
+                const yi = vertices[i].lat;
+                const xj = vertices[j].lng;
+                const yj = vertices[j].lat;
+                const intersects = ((yi > lat) !== (yj > lat))
+                    && (lng < ((xj - xi) * (lat - yi)) / ((yj - yi) || Number.EPSILON) + xi);
+                if (intersects) {
+                    inside = !inside;
+                }
+            }
+            return inside;
+        }
+
+        function hasInclusionZone() {
+            return inclusionZoneVertices.length >= 3;
+        }
+
+        function isPointIncluded(point) {
+            if (hasInclusionZone()) {
+                return includedRouteKeys.has(point.routeKey);
+            }
+            return true;
+        }
+
+        function getIncludedPoints() {
+            return points.filter((point) => isPointIncluded(point));
+        }
+
+        function updateIncludedRouteKeys() {
+            includedRouteKeys = new Set(
+                points
+                    .filter((point) => pointInPolygon(point.lat, point.lng, inclusionZoneVertices))
+                    .map((point) => point.routeKey)
+            );
+        }
+
+        function syncZoneStatus() {
+            const includedCount = getIncludedPoints().length;
+            if (hasInclusionZone()) {
+                zoneStatus.classList.remove('hidden');
+                zoneStatus.innerText = `${includedCount} of ${points.length} waypoint${points.length === 1 ? '' : 's'} inside inclusion zone`;
+                clearZoneBtn.classList.remove('hidden');
+                return;
+            }
+
+            zoneStatus.classList.add('hidden');
+            zoneStatus.innerText = '';
+            clearZoneBtn.classList.add('hidden');
+        }
+
+        function refreshOptimizationAvailability() {
+            const includedCount = getIncludedPoints().length;
+            optimizeBtn.disabled = includedCount < 2;
+            optimizeBtn.innerText = includedCount < 2 && hasInclusionZone()
+                ? 'Need 2 Included Waypoints'
+                : 'Run Optimization';
+        }
+
+        function updateZoneModeButton() {
+            if (isZonePlacementMode) {
+                zoneModeBtn.textContent = hasInclusionZone() ? 'Finish Inclusion Zone' : 'Cancel Inclusion Zone';
+                zoneModeBtn.classList.add('bg-emerald-700');
+                zoneModeBtn.classList.remove('bg-emerald-600');
+                return;
+            }
+
+            zoneModeBtn.textContent = hasInclusionZone() ? 'Redraw Inclusion Zone' : 'Draw Inclusion Zone';
+            zoneModeBtn.classList.remove('bg-emerald-700');
+            zoneModeBtn.classList.add('bg-emerald-600');
+        }
+
+        function clearInclusionZoneLayers() {
+            if (inclusionZonePolygon) {
+                map.removeLayer(inclusionZonePolygon);
+                inclusionZonePolygon = null;
+            }
+            if (inclusionZoneDraft) {
+                map.removeLayer(inclusionZoneDraft);
+                inclusionZoneDraft = null;
+            }
+        }
+
+        function redrawInclusionZone() {
+            clearInclusionZoneLayers();
+            if (!inclusionZoneVertices.length) {
+                return;
+            }
+
+            if (isZonePlacementMode) {
+                inclusionZoneDraft = L.polyline(
+                    inclusionZoneVertices.map((vertex) => [vertex.lat, vertex.lng]),
+                    { color: '#059669', weight: 3, dashArray: '6 6' }
+                ).addTo(map);
+            }
+
+            if (hasInclusionZone() && !isZonePlacementMode) {
+                inclusionZonePolygon = L.polygon(
+                    inclusionZoneVertices.map((vertex) => [vertex.lat, vertex.lng]),
+                    {
+                        color: '#059669',
+                        weight: 2,
+                        fillColor: '#34d399',
+                        fillOpacity: 0.14
+                    }
+                ).addTo(map);
+            }
+        }
+
+        function finalizeInclusionZone() {
+            if (!hasInclusionZone()) {
+                clearInclusionZone();
+                return;
+            }
+
+            isZonePlacementMode = false;
+            updateIncludedRouteKeys();
+            clearOptimizationState();
+            redrawInclusionZone();
+            syncZoneStatus();
+            updateZoneModeButton();
+            refreshOptimizationAvailability();
+            renderUI();
+        }
+
+        function clearInclusionZone() {
+            isZonePlacementMode = false;
+            inclusionZoneVertices = [];
+            includedRouteKeys = new Set();
+            clearOptimizationState();
+            clearInclusionZoneLayers();
+            syncZoneStatus();
+            updateZoneModeButton();
+            refreshOptimizationAvailability();
+            renderUI();
         }
 
         function focusMapOnPoints(targetPoints = points, options = {}) {
@@ -489,10 +644,23 @@
             cursorHorizontal.classList.toggle('hidden', !active);
         }
 
+        function setZonePlacementMode(active) {
+            isZonePlacementMode = active;
+            if (active) {
+                setPlacementMode(false);
+                if (hasInclusionZone()) {
+                    inclusionZoneVertices = [];
+                }
+            }
+            map.getContainer().style.cursor = active ? 'crosshair' : (isPlacementMode ? 'crosshair' : '');
+            updateZoneModeButton();
+            redrawInclusionZone();
+        }
+
         function updateResultPanel(metrics, routePoints) {
             document.getElementById('resDist').innerText = metrics.distance_km + ' km';
             document.getElementById('resTime').innerText = formatDuration(metrics.duration_minutes);
-            document.getElementById('resCount').innerText = routePoints.length + ' waypoints';
+            document.getElementById('resCount').innerText = routePoints.length + ' included waypoints';
             const snapWarnings = getSnapWarnings();
             const snapWarningBox = document.getElementById('snapWarning');
             const snapWarningText = document.getElementById('snapWarningText');
@@ -646,7 +814,9 @@
         }
 
         function renderUI() {
-            optimizeBtn.disabled = points.length < 2;
+            updateIncludedRouteKeys();
+            syncZoneStatus();
+            refreshOptimizationAvailability();
             pointContainer.innerHTML = '';
             markerLookup.clear();
 
@@ -659,8 +829,9 @@
             }
 
             points.forEach((point, index) => {
+                const included = isPointIncluded(point);
                 const row = document.createElement('div');
-                row.className = 'bg-white border border-slate-200 rounded-md px-1.5 py-0.5 shadow-sm hover:border-blue-200 hover:bg-blue-50/40 transition-colors';
+                row.className = `bg-white border rounded-md px-1.5 py-0.5 shadow-sm transition-colors ${included ? 'border-slate-200 hover:border-blue-200 hover:bg-blue-50/40' : 'border-slate-200/70 opacity-60 bg-slate-100'}`;
                 row.dataset.routeKey = point.routeKey;
                 row.draggable = true;
 
@@ -700,17 +871,19 @@
                             <input type="text" value="${point.lng}" onchange="updatePoint(${index}, 'lng', this.value)" class="compact-input w-[92px] font-mono" aria-label="Longitude">
                         </div>
                         <div class="shrink-0">
+                            ${included ? '' : '<span class="text-[10px] uppercase tracking-wide text-amber-700 mr-2">Excluded</span>'}
                             <button onclick="deletePoint(${index})" class="text-[10px] text-slate-400 hover:text-red-600">Remove</button>
                         </div>
                     </div>
                 `;
                 pointContainer.appendChild(row);
 
-                const marker = L.marker([point.lat, point.lng], { draggable: true }).addTo(map);
+                const marker = L.marker([point.lat, point.lng], { draggable: true, opacity: included ? 1 : 0.45 }).addTo(map);
                 marker.bindPopup(`
                     <div class="min-w-[150px]">
                         <div class="font-semibold">${escapeHtml(point.id)}</div>
                         <div class="text-[11px] text-slate-500">${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}</div>
+                        <div class="mt-2 text-[11px] ${included ? 'text-emerald-700' : 'text-amber-700'}">${included ? 'Included in optimization' : 'Outside inclusion zone'}</div>
                     </div>
                 `, { autoPan: false });
                 marker.on('dragend', (event) => {
@@ -738,6 +911,26 @@
 
         addModeBtn.addEventListener('click', () => {
             setPlacementMode(!isPlacementMode);
+            if (isPlacementMode) {
+                setZonePlacementMode(false);
+            }
+        });
+
+        zoneModeBtn.addEventListener('click', () => {
+            if (isZonePlacementMode) {
+                if (inclusionZoneVertices.length >= 3) {
+                    finalizeInclusionZone();
+                } else {
+                    clearInclusionZone();
+                }
+                return;
+            }
+
+            setZonePlacementMode(true);
+        });
+
+        clearZoneBtn.addEventListener('click', () => {
+            clearInclusionZone();
         });
 
         sidebarToggle.addEventListener('click', () => {
@@ -763,6 +956,16 @@
         });
 
         map.on('click', (event) => {
+            if (isZonePlacementMode) {
+                inclusionZoneVertices.push({
+                    lat: roundCoord(event.latlng.lat),
+                    lng: roundCoord(event.latlng.lng)
+                });
+                redrawInclusionZone();
+                updateZoneModeButton();
+                return;
+            }
+
             if (!isPlacementMode) {
                 return;
             }
@@ -812,6 +1015,11 @@
         };
 
         optimizeBtn.addEventListener('click', async function() {
+            const includedPoints = getIncludedPoints();
+            if (includedPoints.length < 2) {
+                return;
+            }
+
             this.disabled = true;
             this.innerText = 'Processing...';
 
@@ -820,7 +1028,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        locations: points.map((point) => ({
+                        locations: includedPoints.map((point) => ({
                             id: point.routeKey,
                             lat: point.lat,
                             lng: point.lng
@@ -859,8 +1067,7 @@
             } catch (error) {
                 alert(error.message || 'Optimization failed.');
             } finally {
-                this.disabled = points.length < 2;
-                this.innerText = 'Run Optimization';
+                refreshOptimizationAvailability();
             }
         });
 
