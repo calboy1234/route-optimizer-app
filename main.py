@@ -1,6 +1,7 @@
 import os
 import requests
 import sys
+from typing import Literal
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -36,6 +37,7 @@ class Point(BaseModel):
 
 class RouteRequest(BaseModel):
     locations: list[Point]
+    optimize_for: Literal["time", "distance"] = "time"
 
 # --- Core Logic ---
 def get_osrm_matrices(locations: list[Point]):
@@ -49,6 +51,31 @@ def get_osrm_matrices(locations: list[Point]):
         return data['durations'], data['distances'], data.get('sources', [])
     else:
         raise Exception(f"OSRM API Failed: {response.text}")
+
+def get_osrm_route_geometry(locations: list[Point]):
+    """Fetch the actual drivable path for the ordered waypoints."""
+    coords = ";".join([f"{loc.lng},{loc.lat}" for loc in locations])
+    url = f"{OSRM_URL}/route/v1/driving/{coords}?overview=full&geometries=geojson&steps=false"
+
+    response = requests.get(url, timeout=15)
+    if response.status_code != 200:
+        raise Exception(f"OSRM Route API Failed: {response.text}")
+
+    data = response.json()
+    routes = data.get("routes", [])
+    if not routes:
+        raise Exception("OSRM Route API returned no drivable path.")
+
+    geometry = routes[0].get("geometry", {})
+    coordinates = geometry.get("coordinates", [])
+    return [
+        {
+            "lat": coordinate[1],
+            "lng": coordinate[0],
+        }
+        for coordinate in coordinates
+        if isinstance(coordinate, list) and len(coordinate) == 2
+    ]
 
 def calculate_route_metrics(route_indices, duration_matrix, distance_matrix):
     """Isolated function to calculate the total time and distance."""
@@ -69,15 +96,15 @@ def calculate_route_metrics(route_indices, duration_matrix, distance_matrix):
         "distance_km": round(total_distance / 1000, 2)
     }
 
-def solve_tsp_open(duration_matrix):
+def solve_tsp_open(cost_matrix):
     """Solve the TSP as an Open Path (No return to start) using a Dummy Node"""
-    num_real_nodes = len(duration_matrix)
+    num_real_nodes = len(cost_matrix)
     num_total_nodes = num_real_nodes + 1 # Add 1 dummy node
     
     # Expand matrix with the Dummy Node
     expanded_matrix = []
     for i in range(num_real_nodes):
-        row = [int(x) for x in duration_matrix[i]]
+        row = [int(x) for x in cost_matrix[i]]
         row.append(0) 
         expanded_matrix.append(row)
         
@@ -136,7 +163,8 @@ def optimize_route(request: RouteRequest):
         
     try:
         duration_matrix, distance_matrix, snapped_sources = get_osrm_matrices(request.locations)
-        optimal_indices = solve_tsp_open(duration_matrix)
+        optimization_matrix = duration_matrix if request.optimize_for == "time" else distance_matrix
+        optimal_indices = solve_tsp_open(optimization_matrix)
         
         if not optimal_indices:
             raise HTTPException(status_code=500, detail="Could not find a mathematical solution.")
@@ -152,20 +180,25 @@ def optimize_route(request: RouteRequest):
                 }
 
         ordered_locations = []
+        ordered_points = []
         for index in optimal_indices:
             point = request.locations[index]
+            ordered_points.append(point)
             ordered_locations.append({
                 "id": point.id,
                 "lat": point.lat,
                 "lng": point.lng,
                 "snapped": snapped_lookup.get(index)
             })
+        road_geometry = get_osrm_route_geometry(ordered_points)
         
         return {
             "status": "success",
             "point_count": len(ordered_locations),
+            "optimize_for": request.optimize_for,
             "metrics": metrics,
-            "optimized_route": ordered_locations
+            "optimized_route": ordered_locations,
+            "road_geometry": road_geometry
         }
         
     except Exception as e:

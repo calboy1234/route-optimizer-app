@@ -64,17 +64,32 @@
         </button>
         <div class="sidebar-content flex flex-col min-h-0 flex-1 transition-opacity duration-150">
         <div class="p-4 bg-slate-900 text-white border-b border-slate-700">
-            <div class="flex justify-between items-start gap-3">
-                <div>
-                    <h1 class="font-bold tracking-tight text-lg">Route Optimizer</h1>
-                    <p class="text-xs text-slate-300 mt-1">Import points, place waypoints directly on the map, then review the optimized route from the summary drawer.</p>
+            <div class="rounded-2xl border border-slate-700/80 bg-slate-950/40 p-4 shadow-lg space-y-4">
+                <div class="space-y-1">
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-blue-300">Trip Planner</p>
+                    <h1 class="font-bold tracking-tight text-2xl text-white">Route Optimizer</h1>
+                    <p class="text-sm text-slate-300 max-w-[28rem]">Build a multi-stop driving plan, shape the inclusion zone, and compare the ideal trip by fastest travel time or shortest driving distance.</p>
                 </div>
-                <div class="flex gap-2 shrink-0">
-                    <button id="btnAddMode" class="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg text-xs font-bold transition">Add Waypoint</button>
-                    <button id="btnZoneMode" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-lg text-xs font-bold transition">Draw Inclusion Zone</button>
-                    <button id="btnClearZone" class="hidden bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-xs font-bold transition">Clear Zone</button>
+
+                <div class="flex flex-wrap gap-2">
+                    <button id="btnAddMode" class="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-xl text-xs font-bold transition">Add Waypoint</button>
+                    <button id="btnZoneMode" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-xl text-xs font-bold transition">Draw Inclusion Zone</button>
+                    <button id="btnClearZone" class="hidden bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Clear Zone</button>
                     <input type="file" id="fileInput" class="hidden" accept=".csv,text/csv">
-                    <button onclick="document.getElementById('fileInput').click()" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-xs font-bold transition">Import</button>
+                    <button onclick="document.getElementById('fileInput').click()" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Import CSV</button>
+                </div>
+
+                <div class="rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-3">
+                    <div class="flex items-center justify-between gap-3 flex-wrap">
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Optimize For</p>
+                            <p class="text-xs text-slate-400 mt-1">Choose the route objective before running optimization.</p>
+                        </div>
+                        <div class="inline-flex rounded-xl border border-slate-700 bg-slate-950 p-1">
+                            <button id="optimizeTimeBtn" type="button" class="px-3 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white transition">Least Time</button>
+                            <button id="optimizeDistanceBtn" type="button" class="px-3 py-2 rounded-lg text-xs font-bold text-slate-300 transition">Least Distance</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -96,8 +111,12 @@
         <div class="absolute bottom-4 left-4 z-[1000] bg-white/95 backdrop-blur rounded-xl border border-slate-200 shadow-lg px-3 py-2 space-y-2">
             <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Map Overlays</p>
             <label class="flex items-center gap-2 text-xs text-slate-700">
+                <input id="toggleDrivingPath" type="checkbox" class="rounded border-slate-300 text-emerald-600" checked>
+                <span>Driving path</span>
+            </label>
+            <label class="flex items-center gap-2 text-xs text-slate-700">
                 <input id="toggleRouteLine" type="checkbox" class="rounded border-slate-300 text-blue-600" checked>
-                <span>Blue route line</span>
+                <span>Straight route line</span>
             </label>
             <label class="flex items-center gap-2 text-xs text-slate-700">
                 <input id="toggleSnapGuides" type="checkbox" class="rounded border-slate-300 text-red-600" checked>
@@ -167,6 +186,8 @@
         let markers = [];
         let optimizedRoute = [];
         let routeLine = null;
+        let drivingPathLine = null;
+        let drivingPathGeometry = [];
         let snapLines = [];
         let snapDots = [];
         let isPlacementMode = false;
@@ -176,7 +197,9 @@
         let draggedRouteKey = null;
         let isSidebarCollapsed = false;
         let showRouteLine = true;
+        let showDrivingPath = true;
         let showSnapGuides = true;
+        let optimizeFor = 'time';
         let isZonePlacementMode = false;
         let inclusionZoneVertices = [];
         let inclusionZonePolygon = null;
@@ -193,6 +216,9 @@
         const sidebarToggleIcon = document.getElementById('sidebarToggleIcon');
         const pointContainer = document.getElementById('pointContainer');
         const optimizeBtn = document.getElementById('btnOptimize');
+        const optimizeTimeBtn = document.getElementById('optimizeTimeBtn');
+        const optimizeDistanceBtn = document.getElementById('optimizeDistanceBtn');
+        const toggleDrivingPath = document.getElementById('toggleDrivingPath');
         const toggleRouteLine = document.getElementById('toggleRouteLine');
         const toggleSnapGuides = document.getElementById('toggleSnapGuides');
         const placementHint = document.getElementById('placementHint');
@@ -394,6 +420,16 @@
 
         function getIncludedPoints() {
             return points.filter((point) => isPointIncluded(point));
+        }
+
+        function updateOptimizationModeButtons() {
+            const isTime = optimizeFor === 'time';
+            optimizeTimeBtn.classList.toggle('bg-blue-600', isTime);
+            optimizeTimeBtn.classList.toggle('text-white', isTime);
+            optimizeTimeBtn.classList.toggle('text-slate-300', !isTime);
+            optimizeDistanceBtn.classList.toggle('bg-blue-600', !isTime);
+            optimizeDistanceBtn.classList.toggle('text-white', !isTime);
+            optimizeDistanceBtn.classList.toggle('text-slate-300', isTime);
         }
 
         function updateIncludedRouteKeys() {
@@ -655,7 +691,22 @@
             map.fitBounds(latLngs, { padding: [48, 48] });
         }
 
+        function focusMapOnDrivingPath() {
+            if (drivingPathGeometry.length < 2) {
+                return false;
+            }
+
+            const latLngs = drivingPathGeometry.map((point) => [point.lat, point.lng]);
+            lastFocusedBounds = L.latLngBounds(latLngs);
+            map.fitBounds(latLngs, { padding: [48, 48] });
+            return true;
+        }
+
         function resetMapView() {
+            if (focusMapOnDrivingPath()) {
+                return;
+            }
+
             if (optimizedRoute.length) {
                 focusMapOnPoints(optimizedRoute, { preferSnapped: true });
                 return;
@@ -686,6 +737,14 @@
             }
         }
 
+        function clearDrivingPath() {
+            if (drivingPathLine) {
+                map.removeLayer(drivingPathLine);
+                drivingPathLine = null;
+            }
+            drivingPathGeometry = [];
+        }
+
         function clearSnapLines() {
             snapLines.forEach((line) => map.removeLayer(line));
             snapLines = [];
@@ -696,11 +755,13 @@
         function clearOptimizationState() {
             optimizedRoute = [];
             hasSummary = false;
+            drivingPathGeometry = [];
             points.forEach((point) => {
                 point.rank = null;
                 delete point.snapped;
             });
             clearRouteLine();
+            clearDrivingPath();
             clearSnapLines();
             resultPanel.classList.add('hidden');
             panelToggle.classList.add('hidden');
@@ -727,6 +788,27 @@
                     weight: 4,
                     opacity: 0.85,
                     dashArray: '10 8'
+                }
+            ).addTo(map);
+        }
+
+        function drawDrivingPath() {
+            if (drivingPathLine) {
+                map.removeLayer(drivingPathLine);
+                drivingPathLine = null;
+            }
+
+            if (!showDrivingPath || drivingPathGeometry.length < 2) {
+                return;
+            }
+
+            drivingPathLine = L.polyline(
+                drivingPathGeometry.map((point) => [point.lat, point.lng]),
+                {
+                    color: '#059669',
+                    weight: 5,
+                    opacity: 0.92,
+                    lineJoin: 'round'
                 }
             ).addTo(map);
         }
@@ -1119,9 +1201,34 @@
             drawOptimizedRoute(optimizedRoute);
         });
 
+        toggleDrivingPath.addEventListener('change', () => {
+            showDrivingPath = toggleDrivingPath.checked;
+            drawDrivingPath();
+        });
+
         toggleSnapGuides.addEventListener('change', () => {
             showSnapGuides = toggleSnapGuides.checked;
             drawSnapLines();
+        });
+
+        optimizeTimeBtn.addEventListener('click', () => {
+            if (optimizeFor === 'time') {
+                return;
+            }
+            optimizeFor = 'time';
+            clearOptimizationState();
+            updateOptimizationModeButtons();
+            renderUI();
+        });
+
+        optimizeDistanceBtn.addEventListener('click', () => {
+            if (optimizeFor === 'distance') {
+                return;
+            }
+            optimizeFor = 'distance';
+            clearOptimizationState();
+            updateOptimizationModeButtons();
+            renderUI();
         });
 
         map.on('mousemove', (event) => {
@@ -1228,6 +1335,7 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
+                        optimize_for: optimizeFor,
                         locations: includedPoints.map((point) => ({
                             id: point.routeKey,
                             lat: point.lat,
@@ -1252,6 +1360,7 @@
                             snapped: routePoint.snapped || null
                         };
                     });
+                    drivingPathGeometry = Array.isArray(data.road_geometry) ? data.road_geometry : [];
                     points.forEach((point) => {
                         const optimizedPoint = optimizedRoute.find((routePoint) => routePoint.routeKey === point.routeKey);
                         const rank = optimizedRoute.findIndex((routePoint) => routePoint.routeKey === point.routeKey);
@@ -1259,6 +1368,7 @@
                         point.snapped = optimizedPoint ? optimizedPoint.snapped : null;
                     });
 
+                    drawDrivingPath();
                     drawOptimizedRoute(optimizedRoute);
                     drawSnapLines();
                     updateResultPanel(data.metrics, optimizedRoute);
@@ -1311,6 +1421,7 @@
             });
         });
 
+        updateOptimizationModeButtons();
         renderUI();
     </script>
 </body>
