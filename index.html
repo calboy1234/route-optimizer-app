@@ -173,6 +173,8 @@
         const cursorVertical = document.getElementById('cursorVertical');
         const cursorHorizontal = document.getElementById('cursorHorizontal');
         const markerLookup = new Map();
+        const SIDEBAR_RESIZE_DELAY_MS = 220;
+        const MAP_FOCUS_DURATION_SECONDS = 0.6;
 
         const streetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxNativeZoom: 19,
@@ -295,15 +297,28 @@
                 .replace(/'/g, '&#39;');
         }
 
-        function focusMapOnPoints(targetPoints = points) {
+        function getPointLatLng(point, options = {}) {
+            const { preferSnapped = false } = options;
+            if (preferSnapped && point && point.snapped) {
+                const snappedLat = Number(point.snapped.lat);
+                const snappedLng = Number(point.snapped.lng);
+                if (Number.isFinite(snappedLat) && Number.isFinite(snappedLng)) {
+                    return [snappedLat, snappedLng];
+                }
+            }
+
+            return [point.lat, point.lng];
+        }
+
+        function focusMapOnPoints(targetPoints = points, options = {}) {
             if (!targetPoints.length) {
                 return;
             }
 
-            const latLngs = targetPoints.map((point) => [point.lat, point.lng]);
+            const latLngs = targetPoints.map((point) => getPointLatLng(point, options));
             if (latLngs.length === 1) {
                 lastFocusedBounds = L.latLngBounds(latLngs, latLngs);
-                map.flyTo(latLngs[0], Math.max(map.getZoom(), 14), { duration: 0.6 });
+                map.flyTo(latLngs[0], Math.max(map.getZoom(), 14), { duration: MAP_FOCUS_DURATION_SECONDS });
                 return;
             }
 
@@ -312,8 +327,8 @@
         }
 
         function resetMapView() {
-            if (routeLine) {
-                focusMapOnPoints(optimizedRoute.length ? optimizedRoute : points);
+            if (optimizedRoute.length) {
+                focusMapOnPoints(optimizedRoute, { preferSnapped: true });
                 return;
             }
 
@@ -377,7 +392,7 @@
             }
 
             routeLine = L.polyline(
-                routePoints.map((point) => [point.lat, point.lng]),
+                routePoints.map((point) => getPointLatLng(point, { preferSnapped: true })),
                 {
                     color: '#2563eb',
                     weight: 4,
@@ -457,7 +472,7 @@
             sidebar.classList.toggle('sidebar-collapsed', collapsed);
             sidebarToggleIcon.innerHTML = collapsed ? '&#9654;' : '&#9664;';
             sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
-            setTimeout(() => map.invalidateSize(), 210);
+            setTimeout(() => map.invalidateSize(), SIDEBAR_RESIZE_DELAY_MS);
         }
 
         function focusPointByRouteKey(routeKey) {
@@ -466,23 +481,45 @@
                 return;
             }
 
-            map.flyTo([point.lat, point.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
+            map.flyTo([point.lat, point.lng], Math.max(map.getZoom(), 18), { duration: MAP_FOCUS_DURATION_SECONDS });
             const marker = markerLookup.get(routeKey);
             if (marker) {
-                setTimeout(() => marker.openPopup(), 200);
+                const openPopup = () => {
+                    map.off('moveend', openPopup);
+                    if (markerLookup.get(routeKey) === marker) {
+                        marker.openPopup();
+                    }
+                };
+
+                map.once('moveend', openPopup);
+                setTimeout(() => {
+                    if (markerLookup.get(routeKey) !== marker) {
+                        map.off('moveend', openPopup);
+                        return;
+                    }
+
+                    if (typeof marker.isPopupOpen === 'function' && marker.isPopupOpen()) {
+                        return;
+                    }
+
+                    openPopup();
+                }, Math.round(MAP_FOCUS_DURATION_SECONDS * 1000) + 120);
             }
         }
 
         function handleFocusWaypoint(routeKey) {
-            const needsExpand = isSidebarCollapsed;
-            if (needsExpand) {
+            const focusAndHighlight = () => {
+                focusPointByRouteKey(routeKey);
+                highlightSidebarPoint(routeKey);
+            };
+
+            if (isSidebarCollapsed) {
                 setSidebarCollapsed(false);
+                setTimeout(focusAndHighlight, SIDEBAR_RESIZE_DELAY_MS + 20);
+                return;
             }
 
-            focusPointByRouteKey(routeKey);
-            setTimeout(() => {
-                highlightSidebarPoint(routeKey);
-            }, needsExpand ? 260 : 0);
+            focusAndHighlight();
         }
 
         function reorderPointsByRouteKey(movedRouteKey, targetRouteKey) {
@@ -746,7 +783,7 @@
                             Jump to sidebar
                         </button>
                     </div>
-                `);
+                `, { autoPan: false });
                 marker.on('dragend', (event) => {
                     clearOptimizationState();
                     const position = event.target.getLatLng();
