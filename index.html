@@ -745,6 +745,9 @@
 
             isZonePlacementMode = false;
             inclusionZoneCursorLatLng = null;
+            map.getContainer().style.cursor = isPlacementMode ? 'crosshair' : '';
+            cursorVertical.classList.toggle('hidden', !isPlacementMode);
+            cursorHorizontal.classList.toggle('hidden', !isPlacementMode);
             updateIncludedRouteKeys();
             clearOptimizationState();
             redrawInclusionZone();
