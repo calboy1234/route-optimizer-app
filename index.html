@@ -1385,17 +1385,6 @@
                 const row = document.createElement('div');
                 row.className = `bg-white border rounded-md px-1.5 py-0.5 shadow-sm transition-colors ${included ? 'border-slate-200 hover:border-blue-200 hover:bg-blue-50/40' : 'border-slate-200/70 opacity-60 bg-slate-100'}`;
                 row.dataset.routeKey = point.routeKey;
-                row.draggable = true;
-
-                row.addEventListener('dragstart', () => {
-                    draggedRouteKey = point.routeKey;
-                    row.classList.add('opacity-60');
-                });
-                row.addEventListener('dragend', () => {
-                    draggedRouteKey = null;
-                    row.classList.remove('opacity-60');
-                    row.classList.remove('sidebar-drop-target');
-                });
                 row.addEventListener('dragover', (event) => {
                     event.preventDefault();
                     if (draggedRouteKey && draggedRouteKey !== point.routeKey) {
@@ -1413,7 +1402,7 @@
 
                 row.innerHTML = `
                     <div class="flex items-center gap-1.5">
-                        <div class="flex flex-col items-center gap-0.5 text-slate-400 cursor-grab select-none" title="Drag to reorder">
+                        <div class="drag-handle flex flex-col items-center gap-0.5 text-slate-400 cursor-grab select-none" title="Drag to reorder" draggable="true">
                             <span class="text-[8px] leading-none">::</span>
                             <span class="text-[8px] leading-none">::</span>
                         </div>
@@ -1429,6 +1418,19 @@
                     </div>
                 `;
                 pointContainer.appendChild(row);
+
+                const dragHandle = row.querySelector('.drag-handle');
+                if (dragHandle) {
+                    dragHandle.addEventListener('dragstart', () => {
+                        draggedRouteKey = point.routeKey;
+                        row.classList.add('opacity-60');
+                    });
+                    dragHandle.addEventListener('dragend', () => {
+                        draggedRouteKey = null;
+                        row.classList.remove('opacity-60');
+                        row.classList.remove('sidebar-drop-target');
+                    });
+                }
 
                 const marker = L.marker([point.lat, point.lng], {
                     draggable: true,
