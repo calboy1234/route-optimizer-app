@@ -452,14 +452,14 @@
                 } else {
                     zoneStatus.innerText = `${includedCount} of ${points.length} waypoint${points.length === 1 ? '' : 's'} inside the zone. Drag green handles to refine it or click white midpoint dots to add corners.`;
                 }
-                clearZoneBtn.classList.toggle('hidden', inclusionZoneVertices.length === 0);
+                clearZoneBtn.classList.add('hidden');
                 return;
             }
 
             if (hasInclusionZone()) {
                 zoneStatus.classList.remove('hidden');
                 zoneStatus.innerText = `${includedCount} of ${points.length} waypoint${points.length === 1 ? '' : 's'} inside the inclusion zone. Drag green handles to refine it or click white midpoint dots to add corners.`;
-                clearZoneBtn.classList.remove('hidden');
+                clearZoneBtn.classList.add('hidden');
                 return;
             }
 
@@ -484,7 +484,7 @@
                 return;
             }
 
-            zoneModeBtn.textContent = hasInclusionZone() ? 'Edit Inclusion Zone' : 'Draw Inclusion Zone';
+            zoneModeBtn.textContent = hasInclusionZone() ? 'Clear Inclusion Zone' : 'Draw Inclusion Zone';
             zoneModeBtn.classList.remove('bg-emerald-700');
             zoneModeBtn.classList.add('bg-emerald-600');
         }
@@ -1182,6 +1182,11 @@
                 } else {
                     clearInclusionZone();
                 }
+                return;
+            }
+
+            if (hasInclusionZone()) {
+                clearInclusionZone();
                 return;
             }
 
