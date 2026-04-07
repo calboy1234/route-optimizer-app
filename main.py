@@ -2,6 +2,8 @@ import os
 import requests
 import sys
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
@@ -16,6 +18,16 @@ OSRM_URL = f"http://{osrm_env}" if not osrm_env.startswith("http") else osrm_env
 
 app = FastAPI(title="Route Optimizer API")
 
+# --- Security: CORS Middleware ---
+# This allows your frontend (the browser) to talk to this backend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # --- Data Models ---
 class Point(BaseModel):
     id: str
@@ -29,7 +41,6 @@ class RouteRequest(BaseModel):
 def get_osrm_matrices(locations: list[Point]):
     """Fetch BOTH travel time and distance matrices from OSRM"""
     coords = ";".join([f"{loc.lng},{loc.lat}" for loc in locations])
-    # Notice we ask for both duration and distance now
     url = f"{OSRM_URL}/table/v1/driving/{coords}?annotations=duration,distance"
     
     response = requests.get(url, timeout=15)
@@ -40,10 +51,7 @@ def get_osrm_matrices(locations: list[Point]):
         raise Exception(f"OSRM API Failed: {response.text}")
 
 def calculate_route_metrics(route_indices, duration_matrix, distance_matrix):
-    """
-    Isolated function to calculate the total time and distance.
-    This makes it easy to add 'stop times' (e.g., 5 mins per delivery) in the future.
-    """
+    """Isolated function to calculate the total time and distance."""
     total_duration = 0.0
     total_distance = 0.0
     
@@ -66,17 +74,16 @@ def solve_tsp_open(duration_matrix):
     num_real_nodes = len(duration_matrix)
     num_total_nodes = num_real_nodes + 1 # Add 1 dummy node
     
-    # 1. Expand matrix with the Dummy Node
+    # Expand matrix with the Dummy Node
     expanded_matrix = []
     for i in range(num_real_nodes):
         row = [int(x) for x in duration_matrix[i]]
-        row.append(0) # Cost to go from any real node to the dummy node is 0
+        row.append(0) 
         expanded_matrix.append(row)
         
-    # Cost to go from dummy node to anywhere else is 0 (required for matrix symmetry but ignored)
     expanded_matrix.append([0] * num_total_nodes)
 
-    # 2. Setup OR-Tools (Starts at 0, Ends at the Dummy Node)
+    # Setup OR-Tools (Starts at 0, Ends at the Dummy Node)
     manager = pywrapcp.RoutingIndexManager(num_total_nodes, 1, [0], [num_real_nodes])
     routing = pywrapcp.RoutingModel(manager)
 
@@ -94,7 +101,7 @@ def solve_tsp_open(duration_matrix):
 
     solution = routing.SolveWithParameters(search_parameters)
 
-    # 3. Extract the route, ignoring the fake Dummy Node
+    # Extract the route
     if solution:
         index = routing.Start(0)
         route_indices = []
@@ -107,29 +114,34 @@ def solve_tsp_open(duration_matrix):
     return None
 
 # --- Web Endpoints ---
-@app.get("/")
+
+# 1. The UI Route (Serves the HTML Dashboard)
+@app.get("/", response_class=FileResponse)
+def serve_ui():
+    """Serves the index.html file to the browser"""
+    if os.path.exists("index.html"):
+        return FileResponse("index.html")
+    return {"error": "UI file not found. Please ensure index.html is in the container root."}
+
+# 2. Health Check
+@app.get("/health")
 def health_check():
     return {"status": "online", "osrm_url": OSRM_URL}
 
+# 3. The Core API Engine
 @app.post("/api/optimize")
 def optimize_route(request: RouteRequest):
     if len(request.locations) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 points to route.")
         
     try:
-        # 1. Get Matrices
         duration_matrix, distance_matrix = get_osrm_matrices(request.locations)
-        
-        # 2. Solve the Open Puzzle
         optimal_indices = solve_tsp_open(duration_matrix)
         
         if not optimal_indices:
             raise HTTPException(status_code=500, detail="Could not find a mathematical solution.")
             
-        # 3. Calculate distinct metrics
         metrics = calculate_route_metrics(optimal_indices, duration_matrix, distance_matrix)
-            
-        # 4. Reconstruct the final list for the frontend
         ordered_locations = [request.locations[i] for i in optimal_indices]
         
         return {
@@ -141,3 +153,8 @@ def optimize_route(request: RouteRequest):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Server Runner ---
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
