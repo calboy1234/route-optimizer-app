@@ -3,204 +3,226 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route Optimizer - Editor</title>
+    <title>Route Pro - Logistics Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
-        #map { height: 100%; width: 100%; z-index: 1; }
-        .active-row { border-left: 4px solid #3b82f6 !important; }
+        #map { height: 100%; width: 100%; z-index: 1; cursor: crosshair; }
+        
+        /* Crosshair lines */
+        .crosshair-v { position: absolute; top: 0; left: 50%; width: 1px; height: 100%; background: rgba(59, 130, 246, 0.5); z-index: 1000; pointer-events: none; display: none; }
+        .crosshair-h { position: absolute; top: 50%; left: 0; width: 100%; height: 1px; background: rgba(59, 130, 246, 0.5); z-index: 1000; pointer-events: none; display: none; }
+        
+        /* Custom Context Menu */
+        #contextMenu { position: absolute; z-index: 2000; display: none; background: white; border: 1px solid #ccc; shadow: lg; padding: 5px 0; border-radius: 4px; min-width: 150px; }
+        #contextMenu button { width: 100%; text-align: left; padding: 8px 12px; font-size: 13px; }
+        #contextMenu button:hover { background: #f3f4f6; color: #2563eb; }
+
+        .compact-input { padding: 2px 4px; font-size: 11px; border: 1px solid #e5e7eb; border-radius: 3px; }
+        .stop-rank { font-size: 10px; font-weight: 800; color: #2563eb; background: #dbeafe; padding: 1px 4px; border-radius: 99px; min-width: 45px; text-align: center; }
     </style>
 </head>
 <body class="bg-gray-100 h-screen flex overflow-hidden">
 
-    <div class="w-2/5 bg-white shadow-xl flex flex-col z-10 border-r border-gray-300">
-        <div class="p-4 bg-blue-700 text-white flex justify-between items-center shadow-md">
-            <h1 class="font-bold text-lg tracking-tight">Route Editor</h1>
-            <button id="btnAddPoint" class="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded text-sm font-semibold transition">
-                + Add Stop
-            </button>
-        </div>
-
-        <div class="p-4 border-b bg-gray-50">
-            <input type="file" id="fileInput" accept=".csv, .tsv, .json, .txt" 
-                   class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
-        </div>
-
-        <div id="pointContainer" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-100">
-            <div class="text-center py-10 text-gray-400 italic text-sm">No stops added yet. Upload a file or click "Add Stop".</div>
-        </div>
-
-        <div class="p-4 bg-white border-t border-gray-200 space-y-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-            <div class="flex justify-between text-sm font-medium text-gray-600 px-1">
-                <span>Total Stops: <span id="statCount">0</span></span>
-                <button id="btnClear" class="text-red-500 hover:text-red-700 text-xs">Clear All</button>
+    <div class="w-[450px] bg-white shadow-xl flex flex-col z-10 border-r border-gray-300">
+        <div class="p-3 bg-slate-800 text-white flex justify-between items-center">
+            <h1 class="font-bold tracking-tight">RoutePro Engine</h1>
+            <div class="flex gap-2">
+                <button id="btnAddMode" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-xs font-bold transition">Add Stop</button>
+                <input type="file" id="fileInput" class="hidden">
+                <button onclick="document.getElementById('fileInput').click()" class="bg-slate-600 hover:bg-slate-500 px-3 py-1 rounded text-xs font-bold">Import</button>
             </div>
-            <button id="btnOptimize" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-lg disabled:opacity-40 transition-all flex justify-center items-center gap-2" disabled>
-                <span>🚀 Run Optimization</span>
+        </div>
+
+        <div id="pointContainer" class="flex-1 overflow-y-auto p-1 space-y-1 bg-gray-50">
+            </div>
+
+        <div class="p-3 bg-white border-t border-gray-200 space-y-2">
+            <button id="btnOptimize" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2 rounded shadow transition-all disabled:opacity-50" disabled>
+                🚀 Run Optimization
             </button>
         </div>
     </div>
 
-    <div class="w-3/5 h-full relative">
+    <div class="flex-1 relative h-full">
         <div id="map"></div>
+        
+        <div id="chV" class="crosshair-v"></div>
+        <div id="chH" class="crosshair-h"></div>
+
+        <div id="dropOverlay" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-[1001] hidden">
+            <div class="w-10 h-10 border-2 border-blue-500 rounded-full mb-4 animate-pulse"></div>
+            <button id="btnConfirmDrop" class="pointer-events-auto bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-full font-bold shadow-2xl">Confirm Waypoint Location</button>
+            <button id="btnCancelDrop" class="pointer-events-auto mt-2 text-white bg-black/40 px-3 py-1 rounded text-xs">Cancel</button>
+        </div>
+
+        <div id="resultPanel" class="absolute top-4 left-4 z-[1000] bg-white/90 backdrop-blur shadow-xl rounded-lg p-3 border border-blue-100 hidden min-w-[200px]">
+            <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Optimization Result</h4>
+            <div class="grid grid-cols-2 gap-4">
+                <div><p class="text-[10px] text-gray-400">Distance</p><p id="resDist" class="font-bold text-blue-700">-</p></div>
+                <div><p class="text-[10px] text-gray-400">Time</p><p id="resTime" class="font-bold text-blue-700">-</p></div>
+            </div>
+            <button onclick="this.parentElement.classList.add('hidden')" class="mt-2 w-full text-[10px] text-gray-400 hover:text-gray-600">Dismiss</button>
+        </div>
+
+        <div id="contextMenu">
+            <button id="ctxAddPoint">📍 Add Waypoint Here</button>
+        </div>
     </div>
 
     <script>
-        // 1. Initial State
         const map = L.map('map').setView([49.8951, -97.1384], 12);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         let points = []; 
         let markers = [];
+        let optimizedOrder = [];
 
-        // 2. The Smart Parser from our previous step
-        function parseCoord(val) {
-            if (!val) return 0;
-            let cleaned = val.toString().toUpperCase().trim();
-            let num = parseFloat(cleaned.replace(/[^0-9.\-]/g, ''));
-            if (cleaned.includes('W') || cleaned.includes('S')) { if (num > 0) num *= -1; }
-            return isNaN(num) ? 0 : num;
+        // --- 1. Right Click Context Menu Logic ---
+        let lastContextLatLng = null;
+        map.on('contextmenu', (e) => {
+            lastContextLatLng = e.latlng;
+            const menu = document.getElementById('contextMenu');
+            menu.style.display = 'block';
+            menu.style.left = e.containerPoint.x + 'px';
+            menu.style.top = e.containerPoint.y + 'px';
+        });
+
+        document.addEventListener('click', () => { document.getElementById('contextMenu').style.display = 'none'; });
+
+        document.getElementById('ctxAddPoint').addEventListener('click', () => {
+            if (lastContextLatLng) addPoint(lastContextLatLng.lat, lastContextLatLng.lng);
+        });
+
+        // --- 2. Placement Mode (Crosshairs) ---
+        const addModeBtn = document.getElementById('btnAddMode');
+        const dropOverlay = document.getElementById('dropOverlay');
+        const chV = document.getElementById('chV');
+        const chH = document.getElementById('chH');
+
+        addModeBtn.addEventListener('click', () => {
+            const isActive = dropOverlay.classList.contains('hidden');
+            dropOverlay.classList.toggle('hidden', !isActive);
+            chV.style.display = isActive ? 'block' : 'none';
+            chH.style.display = isActive ? 'block' : 'none';
+        });
+
+        document.getElementById('btnCancelDrop').addEventListener('click', () => {
+            dropOverlay.classList.add('hidden');
+            chV.style.display = 'none'; chH.style.display = 'none';
+        });
+
+        document.getElementById('btnConfirmDrop').addEventListener('click', () => {
+            const center = map.getCenter();
+            addPoint(center.lat, center.lng);
+            dropOverlay.classList.add('hidden');
+            chV.style.display = 'none'; chH.style.display = 'none';
+        });
+
+        // --- 3. Core Logic & UI ---
+        function addPoint(lat, lng, name = null) {
+            const count = points.length + 1;
+            const newName = name || `Waypoint ${count}`;
+            points.push({ id: newName, lat: parseFloat(lat.toFixed(6)), lng: parseFloat(lng.toFixed(6)), rank: null });
+            renderUI();
         }
 
-        // 3. UI Rendering Logic
         function renderUI() {
             const container = document.getElementById('pointContainer');
-            const statCount = document.getElementById('statCount');
             const optBtn = document.getElementById('btnOptimize');
-            
             container.innerHTML = '';
-            statCount.innerText = points.length;
             optBtn.disabled = points.length < 2;
 
-            // Update Markers on Map
             markers.forEach(m => map.removeLayer(m));
             markers = [];
 
             points.forEach((p, i) => {
-                // Create List Item
-                const card = document.createElement('div');
-                card.className = `bg-white p-3 rounded-lg shadow-sm border border-gray-200 flex flex-col gap-2 transition-all ${i === 0 ? 'active-row ring-1 ring-blue-200' : ''}`;
+                const row = document.createElement('div');
+                row.className = "flex items-center gap-1 bg-white p-1 border-b border-gray-100 hover:bg-blue-50 transition-colors";
                 
-                card.innerHTML = `
-                    <div class="flex justify-between items-center border-b pb-2 mb-1">
-                        <div class="flex items-center gap-2">
-                            <span class="w-6 h-6 flex items-center justify-center rounded-full ${i === 0 ? 'bg-green-500' : 'bg-gray-400'} text-white text-[10px] font-bold">
-                                ${i === 0 ? 'START' : i}
-                            </span>
-                            <input type="text" value="${p.id}" onchange="updatePoint(${i}, 'id', this.value)" 
-                                   class="font-bold text-gray-800 bg-transparent border-none focus:ring-0 p-0 w-32" placeholder="Point Name">
-                        </div>
-                        <div class="flex gap-1">
-                            <button onclick="movePoint(${i}, -1)" class="p-1 hover:bg-gray-100 rounded text-gray-500">▲</button>
-                            <button onclick="movePoint(${i}, 1)" class="p-1 hover:bg-gray-100 rounded text-gray-500">▼</button>
-                            <button onclick="deletePoint(${i})" class="p-1 hover:bg-red-50 text-red-400 rounded ml-2">✕</button>
-                        </div>
-                    </div>
-                    <div class="flex gap-2">
-                        <div class="flex-1">
-                            <label class="text-[10px] uppercase text-gray-400 font-bold">Lat</label>
-                            <input type="text" value="${p.lat}" onchange="updatePoint(${i}, 'lat', this.value)" 
-                                   class="w-full text-xs font-mono p-1 bg-gray-50 border border-gray-200 rounded">
-                        </div>
-                        <div class="flex-1">
-                            <label class="text-[10px] uppercase text-gray-400 font-bold">Lng</label>
-                            <input type="text" value="${p.lng}" onchange="updatePoint(${i}, 'lng', this.value)" 
-                                   class="w-full text-xs font-mono p-1 bg-gray-50 border border-gray-200 rounded">
-                        </div>
-                    </div>
-                `;
-                container.appendChild(card);
+                // Find optimized rank
+                const rankDisplay = p.rank ? `<span class="stop-rank">Stop #${p.rank}</span>` : `<span class="text-[9px] text-gray-300 w-[45px] text-center">${i === 0 ? 'START' : '—'}</span>`;
 
-                // Create Map Marker
+                row.innerHTML = `
+                    <div class="flex flex-col gap-0.5 min-w-[20px]">
+                        <button onclick="movePoint(${i}, -1)" class="text-[8px] text-gray-400 hover:text-blue-500">▲</button>
+                        <button onclick="movePoint(${i}, 1)" class="text-[8px] text-gray-400 hover:text-blue-500">▼</button>
+                    </div>
+                    ${rankDisplay}
+                    <input type="text" value="${p.id}" onchange="updatePoint(${i}, 'id', this.value)" class="compact-input w-24 font-bold" placeholder="Name">
+                    <input type="text" value="${p.lat}" onchange="updatePoint(${i}, 'lat', this.value)" class="compact-input w-20 font-mono">
+                    <input type="text" value="${p.lng}" onchange="updatePoint(${i}, 'lng', this.value)" class="compact-input w-20 font-mono">
+                    <button onclick="deletePoint(${i})" class="ml-auto text-gray-300 hover:text-red-500 px-2 text-xs">✕</button>
+                `;
+                container.appendChild(row);
+
                 const marker = L.marker([p.lat, p.lng], { draggable: true }).addTo(map);
-                marker.bindPopup(`<b>${p.id}</b><br>Stop #${i}`);
-                
+                marker.bindPopup(`<b>${p.id}</b>`);
                 marker.on('dragend', (e) => {
                     const pos = e.target.getLatLng();
                     points[i].lat = parseFloat(pos.lat.toFixed(6));
                     points[i].lng = parseFloat(pos.lng.toFixed(6));
-                    renderUI(); // Sync UI with Map
+                    renderUI();
                 });
                 markers.push(marker);
             });
         }
 
-        // 4. State Management Functions
-        window.updatePoint = (index, field, value) => {
-            if (field === 'id') points[index].id = value;
-            else points[index][field] = parseCoord(value);
-            renderUI();
+        window.updatePoint = (i, f, v) => { points[i][f] = (f === 'id') ? v : parseFloat(v); renderUI(); };
+        window.deletePoint = (i) => { points.splice(i, 1); renderUI(); };
+        window.movePoint = (i, d) => {
+            const next = i + d;
+            if (next >= 0 && next < points.length) {
+                [points[i], points[next]] = [points[next], points[i]];
+                renderUI();
+            }
         };
 
-        window.movePoint = (index, direction) => {
-            const newIndex = index + direction;
-            if (newIndex < 0 || newIndex >= points.length) return;
-            const temp = points[index];
-            points[index] = points[newIndex];
-            points[newIndex] = temp;
-            renderUI();
-        };
-
-        window.deletePoint = (index) => {
-            points.splice(index, 1);
-            renderUI();
-        };
-
-        document.getElementById('btnAddPoint').addEventListener('click', () => {
-            const center = map.getCenter();
-            points.push({ id: `New Stop ${points.length}`, lat: center.lat.toFixed(6), lng: center.lng.toFixed(6) });
-            renderUI();
-        });
-
-        document.getElementById('btnClear').addEventListener('click', () => {
-            if(confirm("Wipe all stops?")) { points = []; renderUI(); }
-        });
-
-        // 5. File Import
-        document.getElementById('fileInput').addEventListener('change', (e) => {
-            Papa.parse(e.target.files[0], {
-                header: true, skipEmptyLines: true,
-                complete: (results) => {
-                    const idAliases = ['id', 'name', 'title', 'location', 'stop', 'customer'];
-                    const latAliases = ['lat', 'latitude', 'y', 'lat.', 'latitude_decimal'];
-                    const lngAliases = ['lng', 'lon', 'longitude', 'x', 'long'];
-
-                    const newPoints = results.data.map(row => {
-                        let clean = { id: "Point", lat: 0, lng: 0 };
-                        for (let [k, v] of Object.entries(row)) {
-                            let key = k.trim().toLowerCase();
-                            if (idAliases.includes(key)) clean.id = v;
-                            if (latAliases.includes(key)) clean.lat = parseCoord(v);
-                            if (lngAliases.includes(key)) clean.lng = parseCoord(v);
-                        }
-                        return clean;
-                    }).filter(p => p.lat !== 0);
-                    
-                    points = [...points, ...newPoints];
-                    renderUI();
-                }
-            });
-        });
-
-        // 6. API Trigger
+        // --- 4. API & Optimization Result ---
         document.getElementById('btnOptimize').addEventListener('click', async function() {
-            this.innerHTML = "<span>⚙️ Computing...</span>";
+            this.innerText = "Processing...";
             try {
-                const response = await fetch('/api/optimize', {
+                const res = await fetch('/api/optimize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ locations: points })
                 });
-                const result = await response.json();
-                if (result.status === 'success') {
-                    points = result.optimized_route; // Reorder based on backend solution
+                const data = await res.json();
+                
+                if (data.status === 'success') {
+                    // Update original points with their rank in the optimized path
+                    points.forEach(p => {
+                        const matchIndex = data.optimized_route.findIndex(opt => opt.id === p.id);
+                        p.rank = matchIndex + 1;
+                    });
+
+                    // Show Result Panel
+                    document.getElementById('resDist').innerText = data.metrics.distance_km + " km";
+                    document.getElementById('resTime').innerText = data.metrics.duration_minutes + " min";
+                    document.getElementById('resultPanel').classList.remove('hidden');
+                    
                     renderUI();
-                    alert(`Route Optimized: ${result.metrics.distance_km} km`);
                 }
-            } catch (e) { alert("API Connection Failed"); }
-            this.innerHTML = "<span>🚀 Run Optimization</span>";
+            } catch (e) { alert("Optimization Failed"); }
+            this.innerText = "🚀 Run Optimization";
+        });
+
+        // File Import Handler
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            Papa.parse(e.target.files[0], {
+                header: true, skipEmptyLines: true,
+                complete: (results) => {
+                    results.data.forEach(row => {
+                        // Basic fuzzy logic for file headers
+                        const lat = row.lat || row.latitude || row.y;
+                        const lng = row.lng || row.longitude || row.x;
+                        const name = row.name || row.id || row.customer;
+                        if (lat && lng) addPoint(parseFloat(lat), parseFloat(lng), name);
+                    });
+                }
+            });
         });
     </script>
 </body>
