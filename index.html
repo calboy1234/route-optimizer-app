@@ -60,6 +60,31 @@
             text-shadow: 0 1px 4px rgba(255, 255, 255, 0.9);
             transform-origin: center;
         }
+        .waypoint-pin {
+            position: relative;
+            width: 20px;
+            height: 20px;
+            border-radius: 9999px 9999px 9999px 0;
+            transform: rotate(-45deg);
+            border: 2px solid rgba(255, 255, 255, 0.95);
+            box-shadow: 0 4px 10px rgba(15, 23, 42, 0.25);
+        }
+        .waypoint-pin::after {
+            content: '';
+            position: absolute;
+            inset: 4px;
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.92);
+        }
+        .waypoint-pin-start {
+            background: #16a34a;
+        }
+        .waypoint-pin-default {
+            background: #2563eb;
+        }
+        .waypoint-pin-excluded {
+            background: #94a3b8;
+        }
     </style>
 </head>
 <body class="bg-slate-100 h-screen flex overflow-hidden text-slate-800">
@@ -414,6 +439,23 @@
                 html: `<span class="zone-handle ${handleClassName}"></span>`,
                 iconSize: [size, size],
                 iconAnchor: [size / 2, size / 2]
+            });
+        }
+
+        function createWaypointMarkerIcon(options = {}) {
+            const { isStart = false, isIncluded = true } = options;
+            const colorClass = !isIncluded
+                ? 'waypoint-pin-excluded'
+                : isStart
+                    ? 'waypoint-pin-start'
+                    : 'waypoint-pin-default';
+
+            return L.divIcon({
+                className: '',
+                html: `<span class="waypoint-pin ${colorClass}"></span>`,
+                iconSize: [22, 22],
+                iconAnchor: [11, 22],
+                popupAnchor: [0, -18]
             });
         }
 
@@ -1180,6 +1222,7 @@
 
             points.forEach((point, index) => {
                 const included = isPointIncluded(point);
+                const isStart = point.rank === 1 || (!optimizedRoute.length && index === 0);
                 const row = document.createElement('div');
                 row.className = `bg-white border rounded-md px-1.5 py-0.5 shadow-sm transition-colors ${included ? 'border-slate-200 hover:border-blue-200 hover:bg-blue-50/40' : 'border-slate-200/70 opacity-60 bg-slate-100'}`;
                 row.dataset.routeKey = point.routeKey;
@@ -1228,11 +1271,16 @@
                 `;
                 pointContainer.appendChild(row);
 
-                const marker = L.marker([point.lat, point.lng], { draggable: true, opacity: included ? 1 : 0.45 }).addTo(map);
+                const marker = L.marker([point.lat, point.lng], {
+                    draggable: true,
+                    opacity: included ? 1 : 0.45,
+                    icon: createWaypointMarkerIcon({ isStart, isIncluded: included })
+                }).addTo(map);
                 marker.bindPopup(`
                     <div class="min-w-[150px]">
                         <div class="font-semibold">${escapeHtml(point.id)}</div>
                         <div class="text-[11px] text-slate-500">${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}</div>
+                        <div class="mt-2 text-[11px] ${isStart ? 'text-green-700' : 'text-slate-500'}">${isStart ? 'Starting point' : 'Waypoint stop'}</div>
                         <div class="mt-2 text-[11px] ${included ? 'text-emerald-700' : 'text-amber-700'}">${included ? 'Included in optimization' : 'Outside inclusion zone'}</div>
                     </div>
                 `, { autoPan: false });
