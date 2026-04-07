@@ -194,6 +194,11 @@ def solve_tsp_open(cost_matrix, fixed_end_node: int | None = None):
             if node < num_real_nodes: 
                 route_indices.append(node)
             index = solution.Value(routing.NextVar(index))
+        if not use_dummy_end:
+            end_index = routing.End(0)
+            end_node = manager.IndexToNode(end_index)
+            if end_node < num_real_nodes and (not route_indices or route_indices[-1] != end_node):
+                route_indices.append(end_node)
         return route_indices
     return None
 
