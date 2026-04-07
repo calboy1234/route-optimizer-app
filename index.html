@@ -53,6 +53,13 @@
             background: #f8fafc;
             border: 2px solid #10b981;
         }
+        .driving-path-arrow {
+            color: #047857;
+            font-size: 14px;
+            font-weight: 700;
+            text-shadow: 0 1px 4px rgba(255, 255, 255, 0.9);
+            transform-origin: center;
+        }
     </style>
 </head>
 <body class="bg-slate-100 h-screen flex overflow-hidden text-slate-800">
@@ -186,7 +193,9 @@
         let markers = [];
         let optimizedRoute = [];
         let routeLine = null;
+        let drivingPathCasingLine = null;
         let drivingPathLine = null;
+        let drivingPathArrows = [];
         let drivingPathGeometry = [];
         let snapLines = [];
         let snapDots = [];
@@ -738,10 +747,16 @@
         }
 
         function clearDrivingPath() {
+            if (drivingPathCasingLine) {
+                map.removeLayer(drivingPathCasingLine);
+                drivingPathCasingLine = null;
+            }
             if (drivingPathLine) {
                 map.removeLayer(drivingPathLine);
                 drivingPathLine = null;
             }
+            drivingPathArrows.forEach((arrow) => map.removeLayer(arrow));
+            drivingPathArrows = [];
             drivingPathGeometry = [];
         }
 
@@ -793,24 +808,79 @@
         }
 
         function drawDrivingPath() {
+            if (drivingPathCasingLine) {
+                map.removeLayer(drivingPathCasingLine);
+                drivingPathCasingLine = null;
+            }
             if (drivingPathLine) {
                 map.removeLayer(drivingPathLine);
                 drivingPathLine = null;
             }
+            drivingPathArrows.forEach((arrow) => map.removeLayer(arrow));
+            drivingPathArrows = [];
 
             if (!showDrivingPath || drivingPathGeometry.length < 2) {
                 return;
             }
 
-            drivingPathLine = L.polyline(
-                drivingPathGeometry.map((point) => [point.lat, point.lng]),
+            const pathLatLngs = drivingPathGeometry.map((point) => [point.lat, point.lng]);
+
+            drivingPathCasingLine = L.polyline(
+                pathLatLngs,
                 {
-                    color: '#059669',
-                    weight: 5,
+                    color: '#f8fafc',
+                    weight: 9,
                     opacity: 0.92,
+                    lineCap: 'round',
                     lineJoin: 'round'
                 }
             ).addTo(map);
+
+            drivingPathLine = L.polyline(
+                pathLatLngs,
+                {
+                    color: '#10b981',
+                    weight: 5,
+                    opacity: 0.7,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                }
+            ).addTo(map);
+
+            const minArrowSpacingMeters = 450;
+            let distanceSinceLastArrow = 0;
+
+            for (let index = 0; index < drivingPathGeometry.length - 1; index += 1) {
+                const start = drivingPathGeometry[index];
+                const end = drivingPathGeometry[index + 1];
+                const segmentDistance = getDistanceMeters(start.lat, start.lng, end.lat, end.lng);
+                distanceSinceLastArrow += segmentDistance;
+
+                if (distanceSinceLastArrow < minArrowSpacingMeters && index < drivingPathGeometry.length - 2) {
+                    continue;
+                }
+
+                const angle = Math.atan2(end.lat - start.lat, end.lng - start.lng) * (180 / Math.PI) + 90;
+                const midpoint = [
+                    (start.lat + end.lat) / 2,
+                    (start.lng + end.lng) / 2
+                ];
+
+                const arrow = L.marker(midpoint, {
+                    interactive: false,
+                    keyboard: false,
+                    zIndexOffset: 1500,
+                    icon: L.divIcon({
+                        className: '',
+                        html: `<div class="driving-path-arrow" style="transform: rotate(${angle}deg);">▲</div>`,
+                        iconSize: [18, 18],
+                        iconAnchor: [9, 9]
+                    })
+                }).addTo(map);
+
+                drivingPathArrows.push(arrow);
+                distanceSinceLastArrow = 0;
+            }
         }
 
         function drawSnapLines() {
