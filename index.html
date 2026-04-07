@@ -53,37 +53,24 @@
             background: #f8fafc;
             border: 2px solid #10b981;
         }
-        .driving-path-arrow {
-            color: #047857;
-            font-size: 14px;
-            font-weight: 700;
-            text-shadow: 0 1px 4px rgba(255, 255, 255, 0.9);
+        .driving-path-arrow-badge {
+            width: 18px;
+            height: 18px;
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid rgba(5, 150, 105, 0.28);
+            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.16);
+            backdrop-filter: blur(2px);
             transform-origin: center;
         }
-        .waypoint-pin {
-            position: relative;
-            width: 20px;
-            height: 20px;
-            border-radius: 9999px 9999px 9999px 0;
-            transform: rotate(-45deg);
-            border: 2px solid rgba(255, 255, 255, 0.95);
-            box-shadow: 0 4px 10px rgba(15, 23, 42, 0.25);
-        }
-        .waypoint-pin::after {
-            content: '';
-            position: absolute;
-            inset: 4px;
-            border-radius: 9999px;
-            background: rgba(255, 255, 255, 0.92);
-        }
-        .waypoint-pin-start {
-            background: #16a34a;
-        }
-        .waypoint-pin-default {
-            background: #2563eb;
-        }
-        .waypoint-pin-excluded {
-            background: #94a3b8;
+        .driving-path-arrow-glyph {
+            color: #047857;
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1;
         }
     </style>
 </head>
@@ -444,18 +431,23 @@
 
         function createWaypointMarkerIcon(options = {}) {
             const { isStart = false, isIncluded = true } = options;
-            const colorClass = !isIncluded
-                ? 'waypoint-pin-excluded'
+            const fillColor = !isIncluded
+                ? '#94a3b8'
                 : isStart
-                    ? 'waypoint-pin-start'
-                    : 'waypoint-pin-default';
+                    ? '#16a34a'
+                    : '#2563eb';
 
             return L.divIcon({
                 className: '',
-                html: `<span class="waypoint-pin ${colorClass}"></span>`,
-                iconSize: [22, 22],
-                iconAnchor: [11, 22],
-                popupAnchor: [0, -18]
+                html: `
+                    <svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <path d="M12 1.5C6.2 1.5 1.5 6.2 1.5 12c0 8.2 10.5 22.5 10.5 22.5S22.5 20.2 22.5 12C22.5 6.2 17.8 1.5 12 1.5Z" fill="${fillColor}" stroke="rgba(255,255,255,0.96)" stroke-width="2"/>
+                        <circle cx="12" cy="12" r="4.2" fill="rgba(255,255,255,0.96)"/>
+                    </svg>
+                `,
+                iconSize: [24, 36],
+                iconAnchor: [12, 35],
+                popupAnchor: [0, -28]
             });
         }
 
@@ -910,7 +902,7 @@
                 }
             ).addTo(map);
 
-            const minArrowSpacingMeters = 450;
+            const minArrowSpacingMeters = 650;
             let distanceSinceLastArrow = 0;
 
             for (let index = 0; index < drivingPathGeometry.length - 1; index += 1) {
@@ -935,7 +927,11 @@
                     zIndexOffset: 1500,
                     icon: L.divIcon({
                         className: '',
-                        html: `<div class="driving-path-arrow" style="transform: rotate(${angle}deg);">▲</div>`,
+                        html: `
+                            <div class="driving-path-arrow-badge" style="transform: rotate(${angle}deg);">
+                                <span class="driving-path-arrow-glyph">➜</span>
+                            </div>
+                        `,
                         iconSize: [18, 18],
                         iconAnchor: [9, 9]
                     })
