@@ -3,190 +3,204 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route Optimizer Dashboard</title>
-    
+    <title>Route Optimizer - Editor</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
-
     <style>
         #map { height: 100%; width: 100%; z-index: 1; }
+        .active-row { border-left: 4px solid #3b82f6 !important; }
     </style>
 </head>
 <body class="bg-gray-100 h-screen flex overflow-hidden">
 
-    <div class="w-1/3 bg-white shadow-lg flex flex-col z-10">
-        <div class="p-4 bg-blue-600 text-white font-bold text-xl flex justify-between items-center">
-            <span>Route Optimizer</span>
-            <span id="connectionStatus" class="text-xs bg-green-500 px-2 py-1 rounded">Online</span>
-        </div>
-
-        <div class="p-4 border-b border-gray-200">
-            <label class="block text-sm font-medium text-gray-700 mb-2">Upload Locations (CSV, JSON, TSV)</label>
-            <input type="file" id="fileInput" accept=".csv, .tsv, .json, .txt" 
-                   class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-        </div>
-
-        <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
-            <h3 class="font-semibold text-gray-700 mb-2 flex justify-between">
-                <span>Preview</span>
-                <span id="pointCount" class="text-blue-600">0 points</span>
-            </h3>
-            <ul id="previewList" class="space-y-2">
-                <li class="text-gray-400 italic text-sm text-center py-10">Waiting for file upload...</li>
-            </ul>
-        </div>
-
-        <div class="p-4 border-t border-gray-200 bg-white space-y-2">
-            <button id="btnLoadMap" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded shadow hidden transition-all">
-                📍 Load to Map
+    <div class="w-2/5 bg-white shadow-xl flex flex-col z-10 border-r border-gray-300">
+        <div class="p-4 bg-blue-700 text-white flex justify-between items-center shadow-md">
+            <h1 class="font-bold text-lg tracking-tight">Route Editor</h1>
+            <button id="btnAddPoint" class="bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded text-sm font-semibold transition">
+                + Add Stop
             </button>
-            <button id="btnOptimize" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow opacity-50 cursor-not-allowed transition-all" disabled>
-                🚀 Optimize Route
+        </div>
+
+        <div class="p-4 border-b bg-gray-50">
+            <input type="file" id="fileInput" accept=".csv, .tsv, .json, .txt" 
+                   class="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer">
+        </div>
+
+        <div id="pointContainer" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-100">
+            <div class="text-center py-10 text-gray-400 italic text-sm">No stops added yet. Upload a file or click "Add Stop".</div>
+        </div>
+
+        <div class="p-4 bg-white border-t border-gray-200 space-y-3 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+            <div class="flex justify-between text-sm font-medium text-gray-600 px-1">
+                <span>Total Stops: <span id="statCount">0</span></span>
+                <button id="btnClear" class="text-red-500 hover:text-red-700 text-xs">Clear All</button>
+            </div>
+            <button id="btnOptimize" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-lg disabled:opacity-40 transition-all flex justify-center items-center gap-2" disabled>
+                <span>🚀 Run Optimization</span>
             </button>
         </div>
     </div>
 
-    <div class="w-2/3 relative h-full">
+    <div class="w-3/5 h-full relative">
         <div id="map"></div>
     </div>
 
     <script>
-        // 1. Initialize Map (Winnipeg Default)
+        // 1. Initial State
         const map = L.map('map').setView([49.8951, -97.1384], 12);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap' }).addTo(map);
 
-        // Global State
-        let parsedData = []; 
-        let markers = [];    
+        let points = []; 
+        let markers = [];
 
-        // 2. The Fuzzy Header Matcher
-        function standardizeHeaders(row) {
-            const idAliases = ['id', 'name', 'title', 'location', 'stop', 'customer', 'label'];
-            const latAliases = ['lat', 'latitude', 'y', 'lat.', 'latitude_decimal', 'coords_lat'];
-            const lngAliases = ['lng', 'lon', 'longitude', 'x', 'long', 'longitude_decimal', 'coords_lng'];
-
-            let cleanRow = { id: "Point " + Math.floor(Math.random() * 1000), lat: null, lng: null };
-
-            for (const [key, value] of Object.entries(row)) {
-                const lowerKey = key.trim().toLowerCase();
-                if (idAliases.includes(lowerKey) && value) cleanRow.id = value;
-                if (latAliases.includes(lowerKey)) cleanRow.lat = parseFloat(value);
-                if (lngAliases.includes(lowerKey)) cleanRow.lng = parseFloat(value);
-            }
-            return cleanRow;
+        // 2. The Smart Parser from our previous step
+        function parseCoord(val) {
+            if (!val) return 0;
+            let cleaned = val.toString().toUpperCase().trim();
+            let num = parseFloat(cleaned.replace(/[^0-9.\-]/g, ''));
+            if (cleaned.includes('W') || cleaned.includes('S')) { if (num > 0) num *= -1; }
+            return isNaN(num) ? 0 : num;
         }
 
-        // 3. File Input Listener
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+        // 3. UI Rendering Logic
+        function renderUI() {
+            const container = document.getElementById('pointContainer');
+            const statCount = document.getElementById('statCount');
+            const optBtn = document.getElementById('btnOptimize');
+            
+            container.innerHTML = '';
+            statCount.innerText = points.length;
+            optBtn.disabled = points.length < 2;
 
-            Papa.parse(file, {
-                header: true,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    parsedData = results.data
-                        .map(standardizeHeaders)
-                        .filter(r => !isNaN(r.lat) && !isNaN(r.lng));
+            // Update Markers on Map
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+
+            points.forEach((p, i) => {
+                // Create List Item
+                const card = document.createElement('div');
+                card.className = `bg-white p-3 rounded-lg shadow-sm border border-gray-200 flex flex-col gap-2 transition-all ${i === 0 ? 'active-row ring-1 ring-blue-200' : ''}`;
+                
+                card.innerHTML = `
+                    <div class="flex justify-between items-center border-b pb-2 mb-1">
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 h-6 flex items-center justify-center rounded-full ${i === 0 ? 'bg-green-500' : 'bg-gray-400'} text-white text-[10px] font-bold">
+                                ${i === 0 ? 'START' : i}
+                            </span>
+                            <input type="text" value="${p.id}" onchange="updatePoint(${i}, 'id', this.value)" 
+                                   class="font-bold text-gray-800 bg-transparent border-none focus:ring-0 p-0 w-32" placeholder="Point Name">
+                        </div>
+                        <div class="flex gap-1">
+                            <button onclick="movePoint(${i}, -1)" class="p-1 hover:bg-gray-100 rounded text-gray-500">▲</button>
+                            <button onclick="movePoint(${i}, 1)" class="p-1 hover:bg-gray-100 rounded text-gray-500">▼</button>
+                            <button onclick="deletePoint(${i})" class="p-1 hover:bg-red-50 text-red-400 rounded ml-2">✕</button>
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <div class="flex-1">
+                            <label class="text-[10px] uppercase text-gray-400 font-bold">Lat</label>
+                            <input type="text" value="${p.lat}" onchange="updatePoint(${i}, 'lat', this.value)" 
+                                   class="w-full text-xs font-mono p-1 bg-gray-50 border border-gray-200 rounded">
+                        </div>
+                        <div class="flex-1">
+                            <label class="text-[10px] uppercase text-gray-400 font-bold">Lng</label>
+                            <input type="text" value="${p.lng}" onchange="updatePoint(${i}, 'lng', this.value)" 
+                                   class="w-full text-xs font-mono p-1 bg-gray-50 border border-gray-200 rounded">
+                        </div>
+                    </div>
+                `;
+                container.appendChild(card);
+
+                // Create Map Marker
+                const marker = L.marker([p.lat, p.lng], { draggable: true }).addTo(map);
+                marker.bindPopup(`<b>${p.id}</b><br>Stop #${i}`);
+                
+                marker.on('dragend', (e) => {
+                    const pos = e.target.getLatLng();
+                    points[i].lat = parseFloat(pos.lat.toFixed(6));
+                    points[i].lng = parseFloat(pos.lng.toFixed(6));
+                    renderUI(); // Sync UI with Map
+                });
+                markers.push(marker);
+            });
+        }
+
+        // 4. State Management Functions
+        window.updatePoint = (index, field, value) => {
+            if (field === 'id') points[index].id = value;
+            else points[index][field] = parseCoord(value);
+            renderUI();
+        };
+
+        window.movePoint = (index, direction) => {
+            const newIndex = index + direction;
+            if (newIndex < 0 || newIndex >= points.length) return;
+            const temp = points[index];
+            points[index] = points[newIndex];
+            points[newIndex] = temp;
+            renderUI();
+        };
+
+        window.deletePoint = (index) => {
+            points.splice(index, 1);
+            renderUI();
+        };
+
+        document.getElementById('btnAddPoint').addEventListener('click', () => {
+            const center = map.getCenter();
+            points.push({ id: `New Stop ${points.length}`, lat: center.lat.toFixed(6), lng: center.lng.toFixed(6) });
+            renderUI();
+        });
+
+        document.getElementById('btnClear').addEventListener('click', () => {
+            if(confirm("Wipe all stops?")) { points = []; renderUI(); }
+        });
+
+        // 5. File Import
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            Papa.parse(e.target.files[0], {
+                header: true, skipEmptyLines: true,
+                complete: (results) => {
+                    const idAliases = ['id', 'name', 'title', 'location', 'stop', 'customer'];
+                    const latAliases = ['lat', 'latitude', 'y', 'lat.', 'latitude_decimal'];
+                    const lngAliases = ['lng', 'lon', 'longitude', 'x', 'long'];
+
+                    const newPoints = results.data.map(row => {
+                        let clean = { id: "Point", lat: 0, lng: 0 };
+                        for (let [k, v] of Object.entries(row)) {
+                            let key = k.trim().toLowerCase();
+                            if (idAliases.includes(key)) clean.id = v;
+                            if (latAliases.includes(key)) clean.lat = parseCoord(v);
+                            if (lngAliases.includes(key)) clean.lng = parseCoord(v);
+                        }
+                        return clean;
+                    }).filter(p => p.lat !== 0);
                     
-                    renderPreview();
+                    points = [...points, ...newPoints];
+                    renderUI();
                 }
             });
         });
 
-        function renderPreview() {
-            const list = document.getElementById('previewList');
-            const countLabel = document.getElementById('pointCount');
-            const loadBtn = document.getElementById('btnLoadMap');
-            
-            list.innerHTML = '';
-            countLabel.innerText = `${parsedData.length} points`;
-
-            parsedData.forEach((p, i) => {
-                const li = document.createElement('li');
-                li.className = "bg-white p-3 rounded-lg shadow-sm border border-gray-200 flex justify-between items-center text-xs";
-                li.innerHTML = `
-                    <div class="flex flex-col">
-                        <span class="font-bold text-gray-800">${i === 0 ? '🟢 ' : ''}${p.id}</span>
-                        <span class="text-gray-400 font-mono">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</span>
-                    </div>
-                `;
-                list.appendChild(li);
-            });
-
-            if (parsedData.length > 0) loadBtn.classList.remove('hidden');
-        }
-
-        // 4. Load to Map Logic
-        document.getElementById('btnLoadMap').addEventListener('click', function() {
-            // Clear old markers
-            markers.forEach(m => map.removeLayer(m));
-            markers = [];
-
-            const bounds = [];
-
-            parsedData.forEach((point, index) => {
-                const marker = L.marker([point.lat, point.lng], {
-                    draggable: true,
-                    title: point.id
-                }).addTo(map);
-
-                marker.bindPopup(`<strong>${point.id}</strong><br>Drag to adjust location.`);
-
-                // Sync drag changes back to the data
-                marker.on('dragend', function(event) {
-                    const newPos = event.target.getLatLng();
-                    parsedData[index].lat = parseFloat(newPos.lat.toFixed(6));
-                    parsedData[index].lng = parseFloat(newPos.lng.toFixed(6));
-                    renderPreview(); 
-                });
-
-                markers.push(marker);
-                bounds.push([point.lat, point.lng]);
-            });
-
-            if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
-
-            // Enable Optimization
-            const optBtn = document.getElementById('btnOptimize');
-            optBtn.disabled = false;
-            optBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-        });
-
-        // 5. Optimize Route API Call
+        // 6. API Trigger
         document.getElementById('btnOptimize').addEventListener('click', async function() {
-            const btn = this;
-            const originalText = btn.innerText;
-            btn.innerText = "📐 Calculating Best Route...";
-            btn.disabled = true;
-
+            this.innerHTML = "<span>⚙️ Computing...</span>";
             try {
                 const response = await fetch('/api/optimize', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ locations: parsedData })
+                    body: JSON.stringify({ locations: points })
                 });
-
                 const result = await response.json();
-
                 if (result.status === 'success') {
-                    alert(`Route Optimized!\nDistance: ${result.metrics.distance_km} km\nEst. Time: ${result.metrics.duration_minutes} mins`);
-                    console.log("Optimal Order:", result.optimized_route);
-                } else {
-                    alert("Error: " + result.detail);
+                    points = result.optimized_route; // Reorder based on backend solution
+                    renderUI();
+                    alert(`Route Optimized: ${result.metrics.distance_km} km`);
                 }
-            } catch (err) {
-                alert("Connection failed. Is the Docker container running?");
-            } finally {
-                btn.innerText = originalText;
-                btn.disabled = false;
-            }
+            } catch (e) { alert("API Connection Failed"); }
+            this.innerHTML = "<span>🚀 Run Optimization</span>";
         });
     </script>
 </body>
