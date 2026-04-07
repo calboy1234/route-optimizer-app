@@ -1,126 +1,117 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Route Optimizer Dashboard</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+// 1. Initialize Map
+const map = L.map('map').setView([49.8951, -97.1384], 12);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+}).addTo(map);
 
-    <style>
-        /* Ensures the map takes up the full height */
-        #map { height: 100%; width: 100%; z-index: 1; }
-    </style>
-</head>
-<body class="bg-gray-100 h-screen flex overflow-hidden">
+// Global State
+let parsedData = []; // The raw data from the file
+let markers = [];    // The actual Leaflet marker objects
 
-    <div class="w-1/3 bg-white shadow-lg flex flex-col z-10">
-        <div class="p-4 bg-blue-600 text-white font-bold text-xl">
-            Route Optimizer
-        </div>
+// --- 2. The Fuzzy Header Matcher ---
+function standardizeHeaders(row) {
+    const idAliases = ['id', 'name', 'title', 'location', 'stop', 'customer'];
+    const latAliases = ['lat', 'latitude', 'y', 'lat.', 'latitude_decimal'];
+    const lngAliases = ['lng', 'lon', 'longitude', 'x', 'long', 'longitude_decimal'];
 
-        <div class="p-4 border-b border-gray-200">
-            <label class="block text-sm font-medium text-gray-700 mb-2">Upload CSV/JSON</label>
-            <input type="file" id="fileInput" accept=".csv, .tsv, .json, .txt" 
-                   class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
-        </div>
+    let cleanRow = { id: "Unknown", lat: null, lng: null };
 
-        <div class="flex-1 overflow-y-auto p-4">
-            <h3 class="font-semibold text-gray-700 mb-2">Parsed Locations Preview</h3>
-            <ul id="previewList" class="space-y-2 text-sm">
-                <li class="text-gray-400 italic">No data loaded yet...</li>
-            </ul>
-        </div>
+    for (const [key, value] of Object.entries(row)) {
+        const lowerKey = key.trim().toLowerCase();
+        if (idAliases.includes(lowerKey)) cleanRow.id = value;
+        if (latAliases.includes(lowerKey)) cleanRow.lat = parseFloat(value);
+        if (lngAliases.includes(lowerKey)) cleanRow.lng = parseFloat(value);
+    }
+    return cleanRow;
+}
 
-        <div class="p-4 border-t border-gray-200 bg-gray-50 space-y-2">
-            <button id="btnLoadMap" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded shadow hidden">
-                Approve & Load to Map
-            </button>
-            <button id="btnOptimize" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded shadow opacity-50 cursor-not-allowed" disabled>
-                Optimize Route
-            </button>
-        </div>
-    </div>
+// --- 3. File Input Listener ---
+document.getElementById('fileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: function(results) {
+            parsedData = results.data.map(standardizeHeaders).filter(r => r.lat && r.lng);
+            renderPreview();
+        }
+    });
+});
 
-    <div class="w-2/3 relative h-full">
-        <div id="map"></div>
-    </div>
+function renderPreview() {
+    const list = document.getElementById('previewList');
+    list.innerHTML = parsedData.map((p, i) => `
+        <li class="bg-white p-2 rounded shadow-sm border border-gray-200 flex justify-between text-xs">
+            <span>${i === 0 ? '🟢 ' : ''}${p.id}</span>
+            <span class="text-gray-400">${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</span>
+        </li>
+    `).join('');
+    document.getElementById('btnLoadMap').classList.remove('hidden');
+}
 
-    <script>
-        // 1. Initialize the Map (Centered on Winnipeg)
-        const map = L.map('map').setView([49.8951, -97.1384], 12);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
+// --- 4. NEW: Load to Map Logic ---
+document.getElementById('btnLoadMap').addEventListener('click', function() {
+    // Clear existing markers
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+
+    const bounds = [];
+
+    parsedData.forEach((point, index) => {
+        const marker = L.marker([point.lat, point.lng], {
+            draggable: true,
+            title: point.id
         }).addTo(map);
 
-        // Global State (The "Truth" for your app)
-        let parsedData = [];
-        let mapMarkers = [];
+        // Add a popup so you can rename or see the ID
+        marker.bindPopup(`<b>${point.id}</b><br>Stop #${index}`);
 
-        // 2. The Fuzzy Header Matcher
-        function standardizeHeaders(row) {
-            const idAliases = ['id', 'name', 'title', 'location', 'stop'];
-            const latAliases = ['lat', 'latitude', 'y', 'lat.'];
-            const lngAliases = ['lng', 'lon', 'longitude', 'x', 'long'];
-
-            let cleanRow = { id: "Unknown", lat: null, lng: null };
-
-            for (const [key, value] of Object.entries(row)) {
-                const lowerKey = key.trim().toLowerCase();
-                
-                if (idAliases.includes(lowerKey)) cleanRow.id = value;
-                if (latAliases.includes(lowerKey)) cleanRow.lat = parseFloat(value).toFixed(6);
-                if (lngAliases.includes(lowerKey)) cleanRow.lng = parseFloat(value).toFixed(6);
-            }
-            return cleanRow;
-        }
-
-        // 3. Handle File Upload
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            // Using PapaParse to read the file
-            Papa.parse(file, {
-                header: true, // Tells it to look for headers
-                skipEmptyLines: true,
-                complete: function(results) {
-                    parsedData = results.data.map(standardizeHeaders).filter(row => row.lat && row.lng);
-                    renderPreview();
-                }
-            });
+        // Update data if you drag the pin!
+        marker.on('dragend', function(event) {
+            const newPos = event.target.getLatLng();
+            parsedData[index].lat = parseFloat(newPos.lat.toFixed(6));
+            parsedData[index].lng = parseFloat(newPos.lng.toFixed(6));
+            renderPreview(); // Sync the sidebar
         });
 
-        // 4. Render the Text Preview
-        function renderPreview() {
-            const list = document.getElementById('previewList');
-            const loadBtn = document.getElementById('btnLoadMap');
-            list.innerHTML = ''; // Clear old
+        markers.push(marker);
+        bounds.push([point.lat, point.lng]);
+    });
 
-            if (parsedData.length === 0) {
-                list.innerHTML = '<li class="text-red-500">No valid coordinates found. Check your file headers.</li>';
-                loadBtn.classList.add('hidden');
-                return;
-            }
+    // Zoom the map to fit all your pins
+    if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [50, 50] });
+    }
 
-            parsedData.forEach((point, index) => {
-                const li = document.createElement('li');
-                li.className = "bg-white p-2 rounded shadow-sm border border-gray-200 flex justify-between";
-                li.innerHTML = `
-                    <span class="font-semibold text-blue-700">${index === 0 ? '🟢 Start: ' : ''}${point.id}</span>
-                    <span class="text-gray-500 text-xs">${point.lat}, ${point.lng}</span>
-                `;
-                list.appendChild(li);
-            });
+    // Enable the Optimize button
+    const optBtn = document.getElementById('btnOptimize');
+    optBtn.disabled = false;
+    optBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+});
 
-            // Show the "Load to Map" button
-            loadBtn.classList.remove('hidden');
+// --- 5. NEW: The API Call (Trigger Optimization) ---
+document.getElementById('btnOptimize').addEventListener('click', async function() {
+    const btn = this;
+    btn.innerText = "Optimizing...";
+    
+    try {
+        const response = await fetch('/api/optimize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ locations: parsedData })
+        });
+
+        const result = await response.json();
+
+        if (result.status === 'success') {
+            alert(`Optimized! Total Distance: ${result.metrics.distance_km} km`);
+            // We'll add the "Draw Route Line" logic next!
+            console.log("Ordered Route:", result.optimized_route);
         }
-    </script>
-</body>
-</html>
+    } catch (err) {
+        alert("Optimization failed. Check console.");
+        console.error(err);
+    } finally {
+        btn.innerText = "Optimize Route";
+    }
+});
