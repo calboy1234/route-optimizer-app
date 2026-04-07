@@ -124,8 +124,9 @@
                     <button id="btnAddMode" class="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-xl text-xs font-bold transition">Add Waypoint</button>
                     <button id="btnZoneMode" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-xl text-xs font-bold transition">Draw Inclusion Zone</button>
                     <button id="btnClearZone" class="hidden bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Clear Zone</button>
-                    <input type="file" id="fileInput" class="hidden" accept=".csv,text/csv">
-                    <button onclick="document.getElementById('fileInput').click()" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Import CSV</button>
+                    <button id="btnExportProject" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Export Project</button>
+                    <input type="file" id="fileInput" class="hidden" accept=".csv,.json,application/json,text/csv">
+                    <button onclick="document.getElementById('fileInput').click()" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Import File</button>
                 </div>
 
                 <div class="rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-3">
@@ -173,6 +174,11 @@
                 <input id="toggleSnapGuides" type="checkbox" class="rounded border-slate-300 text-red-600" checked>
                 <span class="overlay-icon">⋯</span>
                 <span>Red snap guides</span>
+            </label>
+            <label class="flex items-center gap-2 text-xs text-slate-700">
+                <input id="toggleWaypointNumbers" type="checkbox" class="rounded border-slate-300 text-slate-700" checked>
+                <span class="overlay-icon">#</span>
+                <span>Waypoint numbers</span>
             </label>
         </div>
 
@@ -254,6 +260,7 @@
         let showRouteLine = true;
         let showDrivingPath = true;
         let showSnapGuides = true;
+        let showWaypointNumbers = true;
         let optimizeFor = 'time';
         let isZonePlacementMode = false;
         let inclusionZoneVertices = [];
@@ -266,6 +273,7 @@
         const addModeBtn = document.getElementById('btnAddMode');
         const zoneModeBtn = document.getElementById('btnZoneMode');
         const clearZoneBtn = document.getElementById('btnClearZone');
+        const exportProjectBtn = document.getElementById('btnExportProject');
         const sidebar = document.getElementById('sidebar');
         const sidebarToggle = document.getElementById('sidebarToggle');
         const sidebarToggleIcon = document.getElementById('sidebarToggleIcon');
@@ -276,6 +284,7 @@
         const toggleDrivingPath = document.getElementById('toggleDrivingPath');
         const toggleRouteLine = document.getElementById('toggleRouteLine');
         const toggleSnapGuides = document.getElementById('toggleSnapGuides');
+        const toggleWaypointNumbers = document.getElementById('toggleWaypointNumbers');
         const placementHint = document.getElementById('placementHint');
         const resultPanel = document.getElementById('resultPanel');
         const panelToggle = document.getElementById('panelToggle');
@@ -468,7 +477,7 @@
                 className: '',
                 html: `
                     <div style="position: relative; width: 24px; height: 36px;">
-                        ${Number.isFinite(rank) ? `<span class="waypoint-rank-badge">${rank}</span>` : ''}
+                        ${showWaypointNumbers && Number.isFinite(rank) ? `<span class="waypoint-rank-badge">${rank}</span>` : ''}
                         <svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <path d="M12 1.5C6.2 1.5 1.5 6.2 1.5 12c0 8.2 10.5 22.5 10.5 22.5S22.5 20.2 22.5 12C22.5 6.2 17.8 1.5 12 1.5Z" fill="${fillColor}" stroke="rgba(255,255,255,0.96)" stroke-width="2"/>
                             <circle cx="12" cy="12" r="4.2" fill="rgba(255,255,255,0.96)"/>
@@ -479,6 +488,84 @@
                 iconAnchor: [12, 35],
                 popupAnchor: [0, -28]
             });
+        }
+
+        function getProjectPayload() {
+            return {
+                version: 1,
+                exportedAt: new Date().toISOString(),
+                optimizeFor,
+                points: points.map((point) => ({
+                    id: point.id,
+                    routeKey: point.routeKey,
+                    lat: point.lat,
+                    lng: point.lng
+                })),
+                inclusionZone: hasInclusionZone()
+                    ? inclusionZoneVertices.map((vertex) => ({ lat: vertex.lat, lng: vertex.lng }))
+                    : []
+            };
+        }
+
+        function loadProjectPayload(projectData) {
+            if (!projectData || !Array.isArray(projectData.points)) {
+                throw new Error('That project file is missing waypoint data.');
+            }
+
+            const importedPoints = projectData.points
+                .map((point, index) => {
+                    const lat = Number(point.lat);
+                    const lng = Number(point.lng);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                        return null;
+                    }
+
+                    const routeKey = typeof point.routeKey === 'string' && point.routeKey.trim()
+                        ? point.routeKey.trim()
+                        : `point-${index + 1}`;
+
+                    return {
+                        id: String(point.id || `Waypoint ${index + 1}`).trim() || `Waypoint ${index + 1}`,
+                        routeKey,
+                        lat: roundCoord(lat),
+                        lng: roundCoord(lng),
+                        rank: null
+                    };
+                })
+                .filter(Boolean);
+
+            if (!importedPoints.length) {
+                throw new Error('That project file did not contain any valid waypoints.');
+            }
+
+            const importedZone = Array.isArray(projectData.inclusionZone)
+                ? projectData.inclusionZone
+                    .map((vertex) => ({
+                        lat: roundCoord(Number(vertex.lat)),
+                        lng: roundCoord(Number(vertex.lng))
+                    }))
+                    .filter((vertex) => Number.isFinite(vertex.lat) && Number.isFinite(vertex.lng))
+                : [];
+
+            points = importedPoints;
+            inclusionZoneVertices = importedZone.length >= 3 ? importedZone : [];
+            includedRouteKeys = new Set();
+            optimizeFor = projectData.optimizeFor === 'distance' ? 'distance' : 'time';
+
+            const maxRouteKeyNumber = points.reduce((maxValue, point) => {
+                const match = String(point.routeKey).match(/^point-(\d+)$/);
+                const numericValue = match ? Number(match[1]) : 0;
+                return Math.max(maxValue, numericValue);
+            }, 0);
+            nextPointKey = maxRouteKeyNumber + 1;
+
+            setPlacementMode(false);
+            setZonePlacementMode(false);
+            clearOptimizationState();
+            redrawInclusionZone();
+            updateOptimizationModeButtons();
+            renderUI();
+            focusMapOnPoints(points);
         }
 
         function pointInPolygon(lat, lng, vertices) {
@@ -1408,6 +1495,22 @@
             clearInclusionZone();
         });
 
+        exportProjectBtn.addEventListener('click', () => {
+            if (!points.length) {
+                alert('Add at least one waypoint before exporting a project.');
+                return;
+            }
+
+            const projectBlob = new Blob([JSON.stringify(getProjectPayload(), null, 2)], { type: 'application/json' });
+            const projectUrl = URL.createObjectURL(projectBlob);
+            const downloadLink = document.createElement('a');
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            downloadLink.href = projectUrl;
+            downloadLink.download = `route-project-${timestamp}.json`;
+            downloadLink.click();
+            URL.revokeObjectURL(projectUrl);
+        });
+
         sidebarToggle.addEventListener('click', () => {
             setSidebarCollapsed(!isSidebarCollapsed);
         });
@@ -1425,6 +1528,11 @@
         toggleSnapGuides.addEventListener('change', () => {
             showSnapGuides = toggleSnapGuides.checked;
             drawSnapLines();
+        });
+
+        toggleWaypointNumbers.addEventListener('change', () => {
+            showWaypointNumbers = toggleWaypointNumbers.checked;
+            renderUI();
         });
 
         optimizeTimeBtn.addEventListener('click', () => {
@@ -1606,6 +1714,27 @@
         document.getElementById('fileInput').addEventListener('change', (event) => {
             const [file] = event.target.files || [];
             if (!file) {
+                return;
+            }
+
+            const fileName = String(file.name || '').toLowerCase();
+            if (fileName.endsWith('.json') || file.type === 'application/json') {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    try {
+                        const projectData = JSON.parse(String(reader.result || '{}'));
+                        loadProjectPayload(projectData);
+                    } catch (error) {
+                        alert(error.message || 'That project file could not be imported.');
+                    } finally {
+                        event.target.value = '';
+                    }
+                };
+                reader.onerror = () => {
+                    alert('That project file could not be read.');
+                    event.target.value = '';
+                };
+                reader.readAsText(file);
                 return;
             }
 
