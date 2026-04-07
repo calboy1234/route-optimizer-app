@@ -96,9 +96,11 @@
         let markers = [];
         let optimizedRoute = [];
         let routeLine = null;
+        let snapLines = [];
         let isPlacementMode = false;
         let nextPointKey = 1;
         let hasSummary = false;
+        let sidebarHighlightTimeout = null;
 
         const addModeBtn = document.getElementById('btnAddMode');
         const pointContainer = document.getElementById('pointContainer');
@@ -193,13 +195,20 @@
             }
         }
 
+        function clearSnapLines() {
+            snapLines.forEach((line) => map.removeLayer(line));
+            snapLines = [];
+        }
+
         function clearOptimizationState() {
             optimizedRoute = [];
             hasSummary = false;
             points.forEach((point) => {
                 point.rank = null;
+                delete point.snapped;
             });
             clearRouteLine();
+            clearSnapLines();
             resultPanel.classList.add('hidden');
             panelToggle.classList.add('hidden');
             document.getElementById('resDist').innerText = '-';
@@ -223,6 +232,58 @@
                     dashArray: '10 8'
                 }
             ).addTo(map);
+        }
+
+        function drawSnapLines() {
+            clearSnapLines();
+            points.forEach((point) => {
+                if (!point.snapped) {
+                    return;
+                }
+
+                const snappedLat = Number(point.snapped.lat);
+                const snappedLng = Number(point.snapped.lng);
+                if (!Number.isFinite(snappedLat) || !Number.isFinite(snappedLng)) {
+                    return;
+                }
+
+                if (Math.abs(point.lat - snappedLat) < 0.000001 && Math.abs(point.lng - snappedLng) < 0.000001) {
+                    return;
+                }
+
+                const line = L.polyline(
+                    [
+                        [point.lat, point.lng],
+                        [snappedLat, snappedLng]
+                    ],
+                    {
+                        color: '#dc2626',
+                        weight: 2,
+                        opacity: 0.85,
+                        dashArray: '6 6'
+                    }
+                ).addTo(map);
+                snapLines.push(line);
+            });
+        }
+
+        function highlightSidebarPoint(routeKey) {
+            const row = document.querySelector(`[data-route-key="${routeKey}"]`);
+            if (!row) {
+                return;
+            }
+
+            row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            row.classList.add('ring-2', 'ring-blue-400', 'bg-blue-50');
+
+            if (sidebarHighlightTimeout) {
+                clearTimeout(sidebarHighlightTimeout);
+            }
+
+            sidebarHighlightTimeout = setTimeout(() => {
+                row.classList.remove('ring-2', 'ring-blue-400', 'bg-blue-50');
+                sidebarHighlightTimeout = null;
+            }, 3000);
         }
 
         function setPlacementMode(active) {
@@ -389,23 +450,18 @@
             points.forEach((point, index) => {
                 const row = document.createElement('div');
                 row.className = 'bg-white border border-slate-200 rounded-md px-2 py-1 shadow-sm hover:border-blue-200 hover:bg-blue-50/40 transition-colors';
-
-                const statusLabel = point.rank ? `Stop #${point.rank}` : (index === 0 ? 'Start' : 'Pending');
-                const statusClasses = point.rank
-                    ? 'bg-blue-100 text-blue-700 border-blue-200'
-                    : (index === 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200');
+                row.dataset.routeKey = point.routeKey;
 
                 row.innerHTML = `
                     <div class="flex items-center gap-2">
-                        <div class="flex flex-col gap-0.5">
-                            <button onclick="movePoint(${index}, -1)" class="text-[9px] text-slate-400 hover:text-blue-600 leading-none">UP</button>
-                            <button onclick="movePoint(${index}, 1)" class="text-[9px] text-slate-400 hover:text-blue-600 leading-none">DN</button>
+                        <div class="flex flex-col gap-1">
+                            <button onclick="movePoint(${index}, -1)" class="w-6 h-5 rounded border border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600 leading-none text-[10px]" aria-label="Move waypoint up">^</button>
+                            <button onclick="movePoint(${index}, 1)" class="w-6 h-5 rounded border border-slate-200 text-slate-500 hover:border-blue-300 hover:text-blue-600 leading-none text-[10px]" aria-label="Move waypoint down">v</button>
                         </div>
                         <div class="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
                             <input type="text" value="${escapeHtml(point.id)}" onchange="updatePoint(${index}, 'id', this.value)" class="compact-input flex-[1_1_120px] min-w-[110px] font-semibold" placeholder="Waypoint name">
                             <input type="text" value="${point.lat}" onchange="updatePoint(${index}, 'lat', this.value)" class="compact-input w-[96px] font-mono" aria-label="Latitude">
                             <input type="text" value="${point.lng}" onchange="updatePoint(${index}, 'lng', this.value)" class="compact-input w-[96px] font-mono" aria-label="Longitude">
-                            <span class="text-[10px] font-bold px-2 py-1 rounded-full border whitespace-nowrap ${statusClasses}">${statusLabel}</span>
                         </div>
                         <div class="shrink-0">
                             <button onclick="deletePoint(${index})" class="text-[10px] text-slate-400 hover:text-red-600">Remove</button>
@@ -415,7 +471,18 @@
                 pointContainer.appendChild(row);
 
                 const marker = L.marker([point.lat, point.lng], { draggable: true }).addTo(map);
-                marker.bindPopup(`<b>${escapeHtml(point.id)}</b><br>${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`);
+                marker.bindPopup(`
+                    <div class="min-w-[150px]">
+                        <div class="font-semibold">${escapeHtml(point.id)}</div>
+                        <div class="text-[11px] text-slate-500">${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}</div>
+                        <button onclick="jumpToSidebarPoint('${point.routeKey}')" class="mt-2 px-2 py-1 text-[11px] rounded border border-slate-300 text-slate-700 hover:border-blue-300 hover:text-blue-700">
+                            Jump to sidebar
+                        </button>
+                    </div>
+                `);
+                marker.on('click', () => {
+                    highlightSidebarPoint(point.routeKey);
+                });
                 marker.on('dragend', (event) => {
                     clearOptimizationState();
                     const position = event.target.getLatLng();
@@ -499,6 +566,10 @@
             renderUI();
         };
 
+        window.jumpToSidebarPoint = (routeKey) => {
+            highlightSidebarPoint(routeKey);
+        };
+
         optimizeBtn.addEventListener('click', async function() {
             this.disabled = true;
             this.innerText = 'Processing...';
@@ -528,15 +599,19 @@
                             id: localPoint ? localPoint.id : routePoint.id,
                             routeKey: routePoint.id,
                             lat: routePoint.lat,
-                            lng: routePoint.lng
+                            lng: routePoint.lng,
+                            snapped: routePoint.snapped || null
                         };
                     });
                     points.forEach((point) => {
+                        const optimizedPoint = optimizedRoute.find((routePoint) => routePoint.routeKey === point.routeKey);
                         const rank = optimizedRoute.findIndex((routePoint) => routePoint.routeKey === point.routeKey);
                         point.rank = rank >= 0 ? rank + 1 : null;
+                        point.snapped = optimizedPoint ? optimizedPoint.snapped : null;
                     });
 
                     drawOptimizedRoute(optimizedRoute);
+                    drawSnapLines();
                     updateResultPanel(data.metrics, optimizedRoute);
                     renderUI();
                     focusMapOnPoints(optimizedRoute);

@@ -39,14 +39,14 @@ class RouteRequest(BaseModel):
 
 # --- Core Logic ---
 def get_osrm_matrices(locations: list[Point]):
-    """Fetch BOTH travel time and distance matrices from OSRM"""
+    """Fetch travel matrices plus the snapped road coordinates OSRM uses."""
     coords = ";".join([f"{loc.lng},{loc.lat}" for loc in locations])
     url = f"{OSRM_URL}/table/v1/driving/{coords}?annotations=duration,distance"
     
     response = requests.get(url, timeout=15)
     if response.status_code == 200:
         data = response.json()
-        return data['durations'], data['distances']
+        return data['durations'], data['distances'], data.get('sources', [])
     else:
         raise Exception(f"OSRM API Failed: {response.text}")
 
@@ -135,14 +135,31 @@ def optimize_route(request: RouteRequest):
         raise HTTPException(status_code=400, detail="Need at least 2 points to route.")
         
     try:
-        duration_matrix, distance_matrix = get_osrm_matrices(request.locations)
+        duration_matrix, distance_matrix, snapped_sources = get_osrm_matrices(request.locations)
         optimal_indices = solve_tsp_open(duration_matrix)
         
         if not optimal_indices:
             raise HTTPException(status_code=500, detail="Could not find a mathematical solution.")
             
         metrics = calculate_route_metrics(optimal_indices, duration_matrix, distance_matrix)
-        ordered_locations = [request.locations[i] for i in optimal_indices]
+        snapped_lookup = {}
+        for index, source in enumerate(snapped_sources):
+            snapped_location = source.get("location") if isinstance(source, dict) else None
+            if snapped_location and len(snapped_location) == 2:
+                snapped_lookup[index] = {
+                    "lat": snapped_location[1],
+                    "lng": snapped_location[0],
+                }
+
+        ordered_locations = []
+        for index in optimal_indices:
+            point = request.locations[index]
+            ordered_locations.append({
+                "id": point.id,
+                "lat": point.lat,
+                "lng": point.lng,
+                "snapped": snapped_lookup.get(index)
+            })
         
         return {
             "status": "success",
