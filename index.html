@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; connect-src 'self' https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; font-src 'self' data:;">
     <title>Route Optimizer App</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -370,6 +371,16 @@
 
         function roundCoord(value) {
             return parseFloat(Number(value).toFixed(6));
+        }
+
+        function isCoordinateInRange(field, value) {
+            if (field === 'lat') {
+                return value >= -90 && value <= 90;
+            }
+            if (field === 'lng') {
+                return value >= -180 && value <= 180;
+            }
+            return true;
         }
 
         function formatDuration(minutes) {
@@ -1182,7 +1193,7 @@
 
             clearOptimizationState();
             const [movedPoint] = points.splice(fromIndex, 1);
-            const insertionIndex = fromIndex < toIndex ? toIndex : toIndex;
+            const insertionIndex = fromIndex < toIndex ? toIndex - 1 : toIndex;
             points.splice(insertionIndex, 0, movedPoint);
             renderUI();
         }
@@ -1659,6 +1670,14 @@
                 return;
             }
 
+            if (!isCoordinateInRange(field, parsed)) {
+                alert(field === 'lat'
+                    ? 'Latitude must be between -90 and 90.'
+                    : 'Longitude must be between -180 and 180.');
+                renderUI();
+                return;
+            }
+
             points[index][field] = roundCoord(parsed);
             renderUI();
         };
@@ -1704,13 +1723,13 @@
                         }))
                     })
                 });
-                const data = await response.json();
+                const data = await response.json().catch(() => null);
 
                 if (!response.ok) {
-                    throw new Error(data.detail || 'Optimization failed.');
+                    throw new Error((data && data.detail) || 'Optimization failed.');
                 }
 
-                if (data.status === 'success') {
+                if (data && data.status === 'success') {
                     optimizedRoute = data.optimized_route.map((routePoint) => {
                         const localPoint = points.find((point) => point.routeKey === routePoint.id);
                         return {

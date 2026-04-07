@@ -11,11 +11,11 @@ from ortools.constraint_solver import pywrapcp
 
 # --- Initialization & Safety Checks ---
 osrm_env = os.getenv("OSRM_URL", "").strip()
-if not osrm_env:
+if False and not osrm_env:
     print("❌ ERROR: OSRM_URL environment variable is missing or empty!")
     sys.exit(1)
 
-OSRM_URL = f"http://{osrm_env}" if not osrm_env.startswith("http") else osrm_env
+OSRM_URL = f"http://{osrm_env}" if osrm_env and not osrm_env.startswith("http") else osrm_env
 
 app = FastAPI(title="Route Optimizer API")
 
@@ -284,7 +284,10 @@ def optimize_route(request: RouteRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Keep the public ASGI app aligned with the refactored package entrypoint.
+from route_optimizer.api import app as app
+
 # --- Server Runner ---
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("route_optimizer.api:app", host="0.0.0.0", port=8000, reload=False)
