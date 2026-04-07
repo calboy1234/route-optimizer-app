@@ -13,7 +13,7 @@
         .compact-input { padding: 3px 5px; font-size: 10px; border: 1px solid #d1d5db; border-radius: 5px; background: #fff; line-height: 1.15; }
         .compact-input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
         .sidebar-drop-target { border-color: #60a5fa !important; background: #eff6ff !important; }
-        .sidebar-collapsed { width: 32px !important; min-width: 32px !important; overflow: hidden; }
+        .sidebar-collapsed { width: 32px !important; min-width: 32px !important; }
         .sidebar-collapsed .sidebar-content { opacity: 0; pointer-events: none; }
         .sidebar-rail {
             position: absolute;
@@ -448,7 +448,7 @@
             map.flyTo([point.lat, point.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
         }
 
-        function focusWaypoint(routeKey) {
+        function handleFocusWaypoint(routeKey) {
             if (isSidebarCollapsed) {
                 setSidebarCollapsed(false);
             }
@@ -508,7 +508,7 @@
                 document.getElementById('snapWarningList').innerHTML = snapWarnings
                     .sort((a, b) => b.distanceMeters - a.distanceMeters)
                     .map((point) => `
-                        <button type="button" onclick="focusWaypoint('${point.routeKey}')" class="block w-full text-left rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5 hover:border-amber-300 hover:bg-white">
+                        <button type="button" onclick="focusWaypointEntry('${point.routeKey}')" class="block w-full text-left rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5 hover:border-amber-300 hover:bg-white">
                             <div class="text-[11px] font-semibold text-amber-900 break-words">${escapeHtml(point.id)}</div>
                             <div class="text-[11px] text-amber-800">${Math.round(point.distanceMeters)} m from snapped road point</div>
                         </button>
@@ -808,15 +808,15 @@
         };
 
         window.jumpToSidebarPoint = (routeKey) => {
-            focusWaypoint(routeKey);
+            handleFocusWaypoint(routeKey);
         };
 
         window.focusPointByRouteKey = (routeKey) => {
             focusPointByRouteKey(routeKey);
         };
 
-        window.focusWaypoint = (routeKey) => {
-            focusWaypoint(routeKey);
+        window.focusWaypointEntry = (routeKey) => {
+            handleFocusWaypoint(routeKey);
         };
 
         optimizeBtn.addEventListener('click', async function() {
