@@ -54,8 +54,8 @@
             border: 2px solid #10b981;
         }
         .driving-path-arrow-badge {
-            width: 18px;
-            height: 18px;
+            width: 20px;
+            height: 20px;
             border-radius: 9999px;
             display: flex;
             align-items: center;
@@ -71,6 +71,15 @@
             font-size: 11px;
             font-weight: 800;
             line-height: 1;
+        }
+        .overlay-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            color: #475569;
+            font-size: 11px;
+            font-weight: 700;
         }
     </style>
 </head>
@@ -131,14 +140,17 @@
             <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Map Overlays</p>
             <label class="flex items-center gap-2 text-xs text-slate-700">
                 <input id="toggleDrivingPath" type="checkbox" class="rounded border-slate-300 text-emerald-600" checked>
+                <span class="overlay-icon">↗</span>
                 <span>Driving path</span>
             </label>
             <label class="flex items-center gap-2 text-xs text-slate-700">
                 <input id="toggleRouteLine" type="checkbox" class="rounded border-slate-300 text-blue-600" checked>
+                <span class="overlay-icon">—</span>
                 <span>Straight route line</span>
             </label>
             <label class="flex items-center gap-2 text-xs text-slate-700">
                 <input id="toggleSnapGuides" type="checkbox" class="rounded border-slate-300 text-red-600" checked>
+                <span class="overlay-icon">⋯</span>
                 <span>Red snap guides</span>
             </label>
         </div>
@@ -205,6 +217,7 @@
         let markers = [];
         let optimizedRoute = [];
         let routeLine = null;
+        let drivingPathSegments = [];
         let drivingPathCasingLine = null;
         let drivingPathLine = null;
         let drivingPathArrows = [];
@@ -276,12 +289,6 @@
             maxZoom: 22,
             attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
         });
-        const terrainLayer = L.tileLayer('https://stamen-tiles.a.ssl.fastly.net/terrain/{z}/{x}/{y}.jpg', {
-            subdomains: 'abcd',
-            maxNativeZoom: 18,
-            maxZoom: 22,
-            attribution: 'Map tiles by Stamen Design, CC BY 3.0 | Map data &copy; OpenStreetMap contributors'
-        });
         const topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
             maxNativeZoom: 17,
             maxZoom: 22,
@@ -300,7 +307,6 @@
                 Light: lightLayer,
                 Dark: darkLayer,
                 Voyager: voyagerLayer,
-                Terrain: terrainLayer,
                 Topographic: topoLayer,
                 Satellite: satelliteLayer
             },
@@ -802,6 +808,8 @@
         }
 
         function clearDrivingPath() {
+            drivingPathSegments.forEach((segment) => map.removeLayer(segment));
+            drivingPathSegments = [];
             if (drivingPathCasingLine) {
                 map.removeLayer(drivingPathCasingLine);
                 drivingPathCasingLine = null;
@@ -871,6 +879,8 @@
                 map.removeLayer(drivingPathLine);
                 drivingPathLine = null;
             }
+            drivingPathSegments.forEach((segment) => map.removeLayer(segment));
+            drivingPathSegments = [];
             drivingPathArrows.forEach((arrow) => map.removeLayer(arrow));
             drivingPathArrows = [];
 
@@ -894,15 +904,41 @@
             drivingPathLine = L.polyline(
                 pathLatLngs,
                 {
-                    color: '#10b981',
+                    color: 'rgba(16, 185, 129, 0.18)',
                     weight: 5,
-                    opacity: 0.7,
+                    opacity: 1,
                     lineCap: 'round',
                     lineJoin: 'round'
                 }
             ).addTo(map);
 
-            const minArrowSpacingMeters = 650;
+            const gradientStart = [16, 185, 129];
+            const gradientEnd = [37, 99, 235];
+            const segmentCount = Math.max(drivingPathGeometry.length - 1, 1);
+            for (let index = 0; index < drivingPathGeometry.length - 1; index += 1) {
+                const start = drivingPathGeometry[index];
+                const end = drivingPathGeometry[index + 1];
+                const progress = index / Math.max(segmentCount - 1, 1);
+                const red = Math.round(gradientStart[0] + ((gradientEnd[0] - gradientStart[0]) * progress));
+                const green = Math.round(gradientStart[1] + ((gradientEnd[1] - gradientStart[1]) * progress));
+                const blue = Math.round(gradientStart[2] + ((gradientEnd[2] - gradientStart[2]) * progress));
+                const segment = L.polyline(
+                    [
+                        [start.lat, start.lng],
+                        [end.lat, end.lng]
+                    ],
+                    {
+                        color: `rgba(${red}, ${green}, ${blue}, 0.78)`,
+                        weight: 5,
+                        opacity: 1,
+                        lineCap: 'round',
+                        lineJoin: 'round'
+                    }
+                ).addTo(map);
+                drivingPathSegments.push(segment);
+            }
+
+            const minArrowSpacingMeters = 900;
             let distanceSinceLastArrow = 0;
 
             for (let index = 0; index < drivingPathGeometry.length - 1; index += 1) {
@@ -915,7 +951,15 @@
                     continue;
                 }
 
-                const angle = Math.atan2(end.lat - start.lat, end.lng - start.lng) * (180 / Math.PI) + 90;
+                const startPoint = map.latLngToLayerPoint([start.lat, start.lng]);
+                const endPoint = map.latLngToLayerPoint([end.lat, end.lng]);
+                const deltaX = endPoint.x - startPoint.x;
+                const deltaY = endPoint.y - startPoint.y;
+                if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) {
+                    continue;
+                }
+
+                const angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
                 const midpoint = [
                     (start.lat + end.lat) / 2,
                     (start.lng + end.lng) / 2
@@ -929,11 +973,11 @@
                         className: '',
                         html: `
                             <div class="driving-path-arrow-badge" style="transform: rotate(${angle}deg);">
-                                <span class="driving-path-arrow-glyph">➜</span>
+                                <span class="driving-path-arrow-glyph">&#8250;</span>
                             </div>
                         `,
-                        iconSize: [18, 18],
-                        iconAnchor: [9, 9]
+                        iconSize: [20, 20],
+                        iconAnchor: [10, 10]
                     })
                 }).addTo(map);
 
