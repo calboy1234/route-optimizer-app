@@ -34,6 +34,7 @@ class Point(BaseModel):
     id: str
     lat: float
     lng: float
+    lock_group: str | None = None
 
 class RouteRequest(BaseModel):
     locations: list[Point]
@@ -95,6 +96,59 @@ def calculate_route_metrics(route_indices, duration_matrix, distance_matrix):
         "duration_minutes": round(total_duration / 60, 2),
         "distance_km": round(total_distance / 1000, 2)
     }
+
+def normalize_lock_group(lock_group: str | None) -> str | None:
+    if lock_group is None:
+        return None
+
+    cleaned = str(lock_group).strip()
+    return cleaned or None
+
+def build_locked_blocks(locations: list[Point]):
+    grouped_blocks: dict[str, dict] = {}
+    blocks: list[dict] = []
+
+    for index, point in enumerate(locations):
+        lock_group = normalize_lock_group(point.lock_group)
+        if lock_group:
+            if lock_group not in grouped_blocks:
+                grouped_blocks[lock_group] = {
+                    "label": lock_group,
+                    "indices": [],
+                    "first_index": index
+                }
+                blocks.append(grouped_blocks[lock_group])
+            grouped_blocks[lock_group]["indices"].append(index)
+            continue
+
+        blocks.append({
+            "label": None,
+            "indices": [index],
+            "first_index": index
+        })
+
+    return sorted(blocks, key=lambda block: block["first_index"])
+
+def build_block_cost_matrix(blocks, point_cost_matrix):
+    block_cost_matrix = []
+    for from_block_index, from_block in enumerate(blocks):
+        row = []
+        for to_block_index, to_block in enumerate(blocks):
+            if from_block_index == to_block_index:
+                row.append(0)
+                continue
+
+            from_point_index = from_block["indices"][-1]
+            to_point_index = to_block["indices"][0]
+            row.append(point_cost_matrix[from_point_index][to_point_index])
+        block_cost_matrix.append(row)
+    return block_cost_matrix
+
+def expand_block_route(block_route_indices, blocks):
+    expanded_route = []
+    for block_index in block_route_indices:
+        expanded_route.extend(blocks[block_index]["indices"])
+    return expanded_route
 
 def solve_tsp_open(cost_matrix):
     """Solve the TSP as an Open Path (No return to start) using a Dummy Node"""
@@ -164,10 +218,14 @@ def optimize_route(request: RouteRequest):
     try:
         duration_matrix, distance_matrix, snapped_sources = get_osrm_matrices(request.locations)
         optimization_matrix = duration_matrix if request.optimize_for == "time" else distance_matrix
-        optimal_indices = solve_tsp_open(optimization_matrix)
+        locked_blocks = build_locked_blocks(request.locations)
+        block_optimization_matrix = build_block_cost_matrix(locked_blocks, optimization_matrix)
+        optimal_block_indices = [0] if len(locked_blocks) == 1 else solve_tsp_open(block_optimization_matrix)
         
-        if not optimal_indices:
+        if not optimal_block_indices:
             raise HTTPException(status_code=500, detail="Could not find a mathematical solution.")
+
+        optimal_indices = expand_block_route(optimal_block_indices, locked_blocks)
             
         metrics = calculate_route_metrics(optimal_indices, duration_matrix, distance_matrix)
         snapped_lookup = {}
@@ -188,7 +246,8 @@ def optimize_route(request: RouteRequest):
                 "id": point.id,
                 "lat": point.lat,
                 "lng": point.lng,
-                "snapped": snapped_lookup.get(index)
+                "snapped": snapped_lookup.get(index),
+                "lock_group": normalize_lock_group(point.lock_group)
             })
         road_geometry = get_osrm_route_geometry(ordered_points)
         

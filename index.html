@@ -499,7 +499,8 @@
                     id: point.id,
                     routeKey: point.routeKey,
                     lat: point.lat,
-                    lng: point.lng
+                    lng: point.lng,
+                    lockGroup: point.lockGroup || null
                 })),
                 inclusionZone: hasInclusionZone()
                     ? inclusionZoneVertices.map((vertex) => ({ lat: vertex.lat, lng: vertex.lng }))
@@ -529,7 +530,8 @@
                         routeKey,
                         lat: roundCoord(lat),
                         lng: roundCoord(lng),
-                        rank: null
+                        rank: null,
+                        lockGroup: String(point.lockGroup || point.lock_group || '').trim() || null
                     };
                 })
                 .filter(Boolean);
@@ -1242,6 +1244,7 @@
                     <div class="min-w-0">
                         <p class="text-sm font-semibold text-slate-800 break-words">${escapeHtml(point.id)}</p>
                         <p class="text-[11px] text-slate-500 font-mono">${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}</p>
+                        ${point.lockGroup ? `<p class="text-[11px] text-emerald-700 mt-1">Locked group: ${escapeHtml(point.lockGroup)}</p>` : ''}
                     </div>
                 </div>
             `).join('');
@@ -1257,7 +1260,8 @@
                 routeKey: `point-${nextPointKey++}`,
                 lat: roundCoord(lat),
                 lng: roundCoord(lng),
-                rank: null
+                rank: null,
+                lockGroup: null
             };
         }
 
@@ -1410,6 +1414,7 @@
                             <input type="text" value="${escapeHtml(point.id)}" onchange="updatePoint(${index}, 'id', this.value)" class="compact-input flex-[1_1_74px] min-w-[68px] font-semibold" placeholder="Waypoint name">
                             <input type="text" value="${point.lat}" onchange="updatePoint(${index}, 'lat', this.value)" class="compact-input w-[92px] font-mono" aria-label="Latitude">
                             <input type="text" value="${point.lng}" onchange="updatePoint(${index}, 'lng', this.value)" class="compact-input w-[92px] font-mono" aria-label="Longitude">
+                            <input type="text" value="${escapeHtml(point.lockGroup || '')}" onchange="updatePoint(${index}, 'lockGroup', this.value)" class="compact-input w-[108px]" aria-label="Lock group" placeholder="Lock group">
                         </div>
                         <div class="shrink-0">
                             ${included ? '' : '<span class="text-[10px] uppercase tracking-wide text-amber-700 mr-2">Excluded</span>'}
@@ -1442,6 +1447,7 @@
                         <div class="font-semibold">${escapeHtml(point.id)}</div>
                         <div class="text-[11px] text-slate-500">${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}</div>
                         <div class="mt-2 text-[11px] ${isStart ? 'text-green-700' : 'text-slate-500'}">${isStart ? 'Starting point' : 'Waypoint stop'}</div>
+                        ${point.lockGroup ? `<div class="mt-2 text-[11px] text-emerald-700">Locked with group "${escapeHtml(point.lockGroup)}"</div>` : ''}
                         <div class="mt-2 text-[11px] ${included ? 'text-emerald-700' : 'text-amber-700'}">${included ? 'Included in optimization' : 'Outside inclusion zone'}</div>
                     </div>
                 `, { autoPan: false });
@@ -1626,6 +1632,12 @@
                 return;
             }
 
+            if (field === 'lockGroup') {
+                points[index].lockGroup = String(value).trim() || null;
+                renderUI();
+                return;
+            }
+
             const parsed = Number(value);
             if (!Number.isFinite(parsed)) {
                 renderUI();
@@ -1671,7 +1683,8 @@
                         locations: includedPoints.map((point) => ({
                             id: point.routeKey,
                             lat: point.lat,
-                            lng: point.lng
+                            lng: point.lng,
+                            lock_group: point.lockGroup || null
                         }))
                     })
                 });
@@ -1689,7 +1702,8 @@
                             routeKey: routePoint.id,
                             lat: routePoint.lat,
                             lng: routePoint.lng,
-                            snapped: routePoint.snapped || null
+                            snapped: routePoint.snapped || null,
+                            lockGroup: localPoint ? localPoint.lockGroup : (routePoint.lock_group || null)
                         };
                     });
                     drivingPathGeometry = Array.isArray(data.road_geometry) ? data.road_geometry : [];
