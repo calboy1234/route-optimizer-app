@@ -5,70 +5,90 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Route Pro - Logistics Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
-        #map { height: 100%; width: 100%; z-index: 1; cursor: crosshair; }
-        
-        /* Crosshair lines */
-        .crosshair-v { position: absolute; top: 0; left: 50%; width: 1px; height: 100%; background: rgba(59, 130, 246, 0.5); z-index: 1000; pointer-events: none; display: none; }
-        .crosshair-h { position: absolute; top: 50%; left: 0; width: 100%; height: 1px; background: rgba(59, 130, 246, 0.5); z-index: 1000; pointer-events: none; display: none; }
-        
-        /* Custom Context Menu */
-        #contextMenu { position: absolute; z-index: 2000; display: none; background: white; border: 1px solid #ccc; shadow: lg; padding: 5px 0; border-radius: 4px; min-width: 150px; }
-        #contextMenu button { width: 100%; text-align: left; padding: 8px 12px; font-size: 13px; }
-        #contextMenu button:hover { background: #f3f4f6; color: #2563eb; }
-
-        .compact-input { padding: 2px 4px; font-size: 11px; border: 1px solid #e5e7eb; border-radius: 3px; }
-        .stop-rank { font-size: 10px; font-weight: 800; color: #2563eb; background: #dbeafe; padding: 1px 4px; border-radius: 99px; min-width: 45px; text-align: center; }
+        #map { height: 100%; width: 100%; z-index: 1; }
+        #contextMenu { position: absolute; z-index: 2000; display: none; background: white; border: 1px solid #d1d5db; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.16); padding: 6px 0; border-radius: 10px; min-width: 170px; }
+        #contextMenu button { width: 100%; text-align: left; padding: 8px 12px; font-size: 13px; color: #1e293b; }
+        #contextMenu button:hover { background: #eff6ff; color: #1d4ed8; }
+        .compact-input { padding: 6px 8px; font-size: 11px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
+        .compact-input:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
     </style>
 </head>
-<body class="bg-gray-100 h-screen flex overflow-hidden">
+<body class="bg-slate-100 h-screen flex overflow-hidden text-slate-800">
 
-    <div class="w-[450px] bg-white shadow-xl flex flex-col z-10 border-r border-gray-300">
-        <div class="p-3 bg-slate-800 text-white flex justify-between items-center">
-            <h1 class="font-bold tracking-tight">RoutePro Engine</h1>
-            <div class="flex gap-2">
-                <button id="btnAddMode" class="bg-blue-600 hover:bg-blue-500 px-3 py-1 rounded text-xs font-bold transition">Add Stop</button>
-                <input type="file" id="fileInput" class="hidden">
-                <button onclick="document.getElementById('fileInput').click()" class="bg-slate-600 hover:bg-slate-500 px-3 py-1 rounded text-xs font-bold">Import</button>
+    <div class="w-[460px] max-w-full bg-white shadow-xl flex flex-col z-10 border-r border-slate-300">
+        <div class="p-4 bg-slate-900 text-white border-b border-slate-700">
+            <div class="flex justify-between items-start gap-3">
+                <div>
+                    <h1 class="font-bold tracking-tight text-lg">RoutePro Engine</h1>
+                    <p class="text-xs text-slate-300 mt-1">Import points, place waypoints directly on the map, then review the optimized route from the summary drawer.</p>
+                </div>
+                <div class="flex gap-2 shrink-0">
+                    <button id="btnAddMode" class="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-lg text-xs font-bold transition">Add Waypoint</button>
+                    <input type="file" id="fileInput" class="hidden" accept=".csv,text/csv">
+                    <button onclick="document.getElementById('fileInput').click()" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-lg text-xs font-bold transition">Import</button>
+                </div>
             </div>
         </div>
 
-        <div id="pointContainer" class="flex-1 overflow-y-auto p-1 space-y-1 bg-gray-50">
-            </div>
+        <div id="pointContainer" class="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50"></div>
 
-        <div class="p-3 bg-white border-t border-gray-200 space-y-2">
-            <button id="btnOptimize" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-2 rounded shadow transition-all disabled:opacity-50" disabled>
-                🚀 Run Optimization
+        <div class="p-4 bg-white border-t border-slate-200 space-y-2">
+            <button id="btnOptimize" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 rounded-xl shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                Run Optimization
             </button>
         </div>
     </div>
 
-    <div class="flex-1 relative h-full">
+    <div class="flex-1 relative h-full overflow-hidden">
         <div id="map"></div>
-        
-        <div id="chV" class="crosshair-v"></div>
-        <div id="chH" class="crosshair-h"></div>
 
-        <div id="dropOverlay" class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-[1001] hidden">
-            <div class="w-10 h-10 border-2 border-blue-500 rounded-full mb-4 animate-pulse"></div>
-            <button id="btnConfirmDrop" class="pointer-events-auto bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-full font-bold shadow-2xl">Confirm Waypoint Location</button>
-            <button id="btnCancelDrop" class="pointer-events-auto mt-2 text-white bg-black/40 px-3 py-1 rounded text-xs">Cancel</button>
-        </div>
-
-        <div id="resultPanel" class="absolute top-4 left-4 z-[1000] bg-white/90 backdrop-blur shadow-xl rounded-lg p-3 border border-blue-100 hidden min-w-[200px]">
-            <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Optimization Result</h4>
-            <div class="grid grid-cols-2 gap-4">
-                <div><p class="text-[10px] text-gray-400">Distance</p><p id="resDist" class="font-bold text-blue-700">-</p></div>
-                <div><p class="text-[10px] text-gray-400">Time</p><p id="resTime" class="font-bold text-blue-700">-</p></div>
+        <div id="placementHint" class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] hidden">
+            <div class="bg-slate-900 text-white px-4 py-2 rounded-full shadow-xl text-sm font-medium">
+                Click anywhere on the map to place the next waypoint.
             </div>
-            <button onclick="this.parentElement.classList.add('hidden')" class="mt-2 w-full text-[10px] text-gray-400 hover:text-gray-600">Dismiss</button>
         </div>
+
+        <button id="panelToggle" class="absolute top-4 right-4 z-[1002] hidden bg-white/95 backdrop-blur px-4 py-2 rounded-full shadow-lg border border-slate-200 text-sm font-semibold text-slate-700 hover:text-blue-700">
+            Hide Summary
+        </button>
+
+        <aside id="resultPanel" class="absolute top-16 right-4 z-[1001] hidden w-[320px] max-w-[calc(100%-2rem)] bg-white/95 backdrop-blur rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 bg-slate-900 text-white flex items-start justify-between gap-3">
+                <div>
+                    <h2 class="text-sm font-bold tracking-wide uppercase">Route Summary</h2>
+                    <p class="text-xs text-slate-300 mt-1">Latest optimization result</p>
+                </div>
+                <button id="btnHidePanel" class="text-xs text-slate-300 hover:text-white">Hide</button>
+            </div>
+
+            <div class="p-4 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="rounded-xl bg-blue-50 border border-blue-100 p-3">
+                        <p class="text-[11px] uppercase tracking-wide text-slate-500">Distance</p>
+                        <p id="resDist" class="font-bold text-blue-700 text-lg">-</p>
+                    </div>
+                    <div class="rounded-xl bg-blue-50 border border-blue-100 p-3">
+                        <p class="text-[11px] uppercase tracking-wide text-slate-500">Time</p>
+                        <p id="resTime" class="font-bold text-blue-700 text-lg">-</p>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <h3 class="text-xs font-bold uppercase tracking-wide text-slate-500">Visit Order</h3>
+                        <span id="resCount" class="text-xs text-slate-400">0 waypoints</span>
+                    </div>
+                    <div id="resultStops" class="max-h-[320px] overflow-y-auto space-y-2"></div>
+                </div>
+            </div>
+        </aside>
 
         <div id="contextMenu">
-            <button id="ctxAddPoint">📍 Add Waypoint Here</button>
+            <button id="ctxAddPoint">Add Waypoint Here</button>
         </div>
     </div>
 
@@ -76,154 +96,437 @@
         const map = L.map('map').setView([49.8951, -97.1384], 12);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-        let points = []; 
+        let points = [];
         let markers = [];
-        let optimizedOrder = [];
+        let optimizedRoute = [];
+        let routeLine = null;
+        let isPlacementMode = false;
+        let previewMarker = null;
+        let nextPointKey = 1;
 
-        // --- 1. Right Click Context Menu Logic ---
-        let lastContextLatLng = null;
-        map.on('contextmenu', (e) => {
-            lastContextLatLng = e.latlng;
-            const menu = document.getElementById('contextMenu');
-            menu.style.display = 'block';
-            menu.style.left = e.containerPoint.x + 'px';
-            menu.style.top = e.containerPoint.y + 'px';
-        });
-
-        document.addEventListener('click', () => { document.getElementById('contextMenu').style.display = 'none'; });
-
-        document.getElementById('ctxAddPoint').addEventListener('click', () => {
-            if (lastContextLatLng) addPoint(lastContextLatLng.lat, lastContextLatLng.lng);
-        });
-
-        // --- 2. Placement Mode (Crosshairs) ---
         const addModeBtn = document.getElementById('btnAddMode');
-        const dropOverlay = document.getElementById('dropOverlay');
-        const chV = document.getElementById('chV');
-        const chH = document.getElementById('chH');
+        const pointContainer = document.getElementById('pointContainer');
+        const optimizeBtn = document.getElementById('btnOptimize');
+        const placementHint = document.getElementById('placementHint');
+        const resultPanel = document.getElementById('resultPanel');
+        const panelToggle = document.getElementById('panelToggle');
 
-        addModeBtn.addEventListener('click', () => {
-            const isActive = dropOverlay.classList.contains('hidden');
-            dropOverlay.classList.toggle('hidden', !isActive);
-            chV.style.display = isActive ? 'block' : 'none';
-            chH.style.display = isActive ? 'block' : 'none';
-        });
+        function roundCoord(value) {
+            return parseFloat(Number(value).toFixed(6));
+        }
 
-        document.getElementById('btnCancelDrop').addEventListener('click', () => {
-            dropOverlay.classList.add('hidden');
-            chV.style.display = 'none'; chH.style.display = 'none';
-        });
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
 
-        document.getElementById('btnConfirmDrop').addEventListener('click', () => {
-            const center = map.getCenter();
-            addPoint(center.lat, center.lng);
-            dropOverlay.classList.add('hidden');
-            chV.style.display = 'none'; chH.style.display = 'none';
-        });
+        function focusMapOnPoints(targetPoints = points) {
+            if (!targetPoints.length) {
+                return;
+            }
 
-        // --- 3. Core Logic & UI ---
-        function addPoint(lat, lng, name = null) {
-            const count = points.length + 1;
-            const newName = name || `Waypoint ${count}`;
-            points.push({ id: newName, lat: parseFloat(lat.toFixed(6)), lng: parseFloat(lng.toFixed(6)), rank: null });
+            const latLngs = targetPoints.map((point) => [point.lat, point.lng]);
+            if (latLngs.length === 1) {
+                map.flyTo(latLngs[0], Math.max(map.getZoom(), 14), { duration: 0.6 });
+                return;
+            }
+
+            map.fitBounds(latLngs, { padding: [48, 48] });
+        }
+
+        function setResultPanelVisible(visible) {
+            resultPanel.classList.toggle('hidden', !visible);
+            panelToggle.textContent = visible ? 'Hide Summary' : 'Show Summary';
+        }
+
+        function clearRouteLine() {
+            if (routeLine) {
+                map.removeLayer(routeLine);
+                routeLine = null;
+            }
+        }
+
+        function clearOptimizationState() {
+            optimizedRoute = [];
+            points.forEach((point) => {
+                point.rank = null;
+            });
+            clearRouteLine();
+            resultPanel.classList.add('hidden');
+            panelToggle.classList.add('hidden');
+            panelToggle.textContent = 'Show Summary';
+            document.getElementById('resDist').innerText = '-';
+            document.getElementById('resTime').innerText = '-';
+            document.getElementById('resCount').innerText = '0 waypoints';
+            document.getElementById('resultStops').innerHTML = '';
+        }
+
+        function drawOptimizedRoute(routePoints) {
+            clearRouteLine();
+            if (routePoints.length < 2) {
+                return;
+            }
+
+            routeLine = L.polyline(
+                routePoints.map((point) => [point.lat, point.lng]),
+                {
+                    color: '#2563eb',
+                    weight: 4,
+                    opacity: 0.85,
+                    dashArray: '10 8'
+                }
+            ).addTo(map);
+        }
+
+        function setPlacementMode(active) {
+            isPlacementMode = active;
+            placementHint.classList.toggle('hidden', !active);
+            addModeBtn.textContent = active ? 'Cancel Waypoint' : 'Add Waypoint';
+            addModeBtn.classList.toggle('bg-blue-600', !active);
+            addModeBtn.classList.toggle('hover:bg-blue-500', !active);
+            addModeBtn.classList.toggle('bg-emerald-600', active);
+            addModeBtn.classList.toggle('hover:bg-emerald-500', active);
+            map.getContainer().style.cursor = active ? 'crosshair' : '';
+
+            if (!active && previewMarker) {
+                map.removeLayer(previewMarker);
+                previewMarker = null;
+            }
+        }
+
+        function updateResultPanel(metrics, routePoints) {
+            document.getElementById('resDist').innerText = metrics.distance_km + ' km';
+            document.getElementById('resTime').innerText = metrics.duration_minutes + ' min';
+            document.getElementById('resCount').innerText = routePoints.length + ' waypoints';
+            document.getElementById('resultStops').innerHTML = routePoints.map((point, index) => `
+                <div class="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div class="w-7 h-7 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center shrink-0">${index + 1}</div>
+                    <div class="min-w-0">
+                        <p class="text-sm font-semibold text-slate-800 break-words">${escapeHtml(point.id)}</p>
+                        <p class="text-[11px] text-slate-500 font-mono">${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}</p>
+                    </div>
+                </div>
+            `).join('');
+
+            panelToggle.classList.remove('hidden');
+            setResultPanelVisible(true);
+        }
+
+        function createPoint(lat, lng, name = null, fallbackIndex = points.length + 1) {
+            const label = name && String(name).trim() ? String(name).trim() : `Waypoint ${fallbackIndex}`;
+            return {
+                id: label,
+                routeKey: `point-${nextPointKey++}`,
+                lat: roundCoord(lat),
+                lng: roundCoord(lng),
+                rank: null
+            };
+        }
+
+        function addPoint(lat, lng, name = null, options = {}) {
+            const latNumber = Number(lat);
+            const lngNumber = Number(lng);
+            if (!Number.isFinite(latNumber) || !Number.isFinite(lngNumber)) {
+                return false;
+            }
+
+            if (!options.preserveOptimization) {
+                clearOptimizationState();
+            }
+
+            points.push(createPoint(latNumber, lngNumber, name));
             renderUI();
+
+            if (options.focus) {
+                focusMapOnPoints([points[points.length - 1]]);
+            }
+
+            return true;
+        }
+
+        function normalizeRow(row) {
+            const normalized = {};
+            Object.entries(row).forEach(([key, value]) => {
+                normalized[String(key).trim().toLowerCase()] = value;
+            });
+
+            const lat = normalized.lat ?? normalized.latitude ?? normalized.y;
+            const lng = normalized.lng ?? normalized.lon ?? normalized.long ?? normalized.longitude ?? normalized.x;
+            const name = normalized.name ?? normalized.id ?? normalized.customer ?? normalized.label;
+
+            const latNumber = Number(lat);
+            const lngNumber = Number(lng);
+            if (!Number.isFinite(latNumber) || !Number.isFinite(lngNumber)) {
+                return null;
+            }
+
+            return {
+                lat: latNumber,
+                lng: lngNumber,
+                name
+            };
+        }
+
+        function renderEmptyState() {
+            pointContainer.innerHTML = `
+                <div class="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-8 text-center shadow-sm">
+                    <p class="text-sm font-semibold text-slate-700">No waypoints yet</p>
+                    <p class="text-xs text-slate-500 mt-2">Import a CSV or click <span class="font-semibold text-slate-700">Add Waypoint</span> and place points directly on the map.</p>
+                </div>
+            `;
         }
 
         function renderUI() {
-            const container = document.getElementById('pointContainer');
-            const optBtn = document.getElementById('btnOptimize');
-            container.innerHTML = '';
-            optBtn.disabled = points.length < 2;
+            optimizeBtn.disabled = points.length < 2;
+            pointContainer.innerHTML = '';
 
-            markers.forEach(m => map.removeLayer(m));
+            markers.forEach((marker) => map.removeLayer(marker));
             markers = [];
 
-            points.forEach((p, i) => {
+            if (!points.length) {
+                renderEmptyState();
+                return;
+            }
+
+            points.forEach((point, index) => {
                 const row = document.createElement('div');
-                row.className = "flex items-center gap-1 bg-white p-1 border-b border-gray-100 hover:bg-blue-50 transition-colors";
-                
-                // Find optimized rank
-                const rankDisplay = p.rank ? `<span class="stop-rank">Stop #${p.rank}</span>` : `<span class="text-[9px] text-gray-300 w-[45px] text-center">${i === 0 ? 'START' : '—'}</span>`;
+                row.className = 'bg-white border border-slate-200 rounded-2xl px-3 py-3 shadow-sm hover:border-blue-200 hover:bg-blue-50/40 transition-colors';
+
+                const statusLabel = point.rank ? `Stop #${point.rank}` : (index === 0 ? 'Start' : 'Pending');
+                const statusClasses = point.rank
+                    ? 'bg-blue-100 text-blue-700 border-blue-200'
+                    : (index === 0 ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200');
 
                 row.innerHTML = `
-                    <div class="flex flex-col gap-0.5 min-w-[20px]">
-                        <button onclick="movePoint(${i}, -1)" class="text-[8px] text-gray-400 hover:text-blue-500">▲</button>
-                        <button onclick="movePoint(${i}, 1)" class="text-[8px] text-gray-400 hover:text-blue-500">▼</button>
+                    <div class="flex items-start gap-3">
+                        <div class="flex flex-col gap-1 pt-1">
+                            <button onclick="movePoint(${index}, -1)" class="text-[10px] text-slate-400 hover:text-blue-600 leading-none">UP</button>
+                            <button onclick="movePoint(${index}, 1)" class="text-[10px] text-slate-400 hover:text-blue-600 leading-none">DN</button>
+                        </div>
+                        <div class="flex-1 min-w-0 space-y-2">
+                            <div class="flex items-center gap-2">
+                                <input type="text" value="${escapeHtml(point.id)}" onchange="updatePoint(${index}, 'id', this.value)" class="compact-input flex-1 font-semibold" placeholder="Waypoint name">
+                                <button onclick="deletePoint(${index})" class="text-xs text-slate-400 hover:text-red-600 shrink-0">Remove</button>
+                            </div>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <input type="text" value="${point.lat}" onchange="updatePoint(${index}, 'lat', this.value)" class="compact-input w-[110px] font-mono" aria-label="Latitude">
+                                <input type="text" value="${point.lng}" onchange="updatePoint(${index}, 'lng', this.value)" class="compact-input w-[110px] font-mono" aria-label="Longitude">
+                                <span class="text-[11px] font-bold px-3 py-1 rounded-full border ${statusClasses}">${statusLabel}</span>
+                            </div>
+                        </div>
                     </div>
-                    ${rankDisplay}
-                    <input type="text" value="${p.id}" onchange="updatePoint(${i}, 'id', this.value)" class="compact-input w-24 font-bold" placeholder="Name">
-                    <input type="text" value="${p.lat}" onchange="updatePoint(${i}, 'lat', this.value)" class="compact-input w-20 font-mono">
-                    <input type="text" value="${p.lng}" onchange="updatePoint(${i}, 'lng', this.value)" class="compact-input w-20 font-mono">
-                    <button onclick="deletePoint(${i})" class="ml-auto text-gray-300 hover:text-red-500 px-2 text-xs">✕</button>
                 `;
-                container.appendChild(row);
+                pointContainer.appendChild(row);
 
-                const marker = L.marker([p.lat, p.lng], { draggable: true }).addTo(map);
-                marker.bindPopup(`<b>${p.id}</b>`);
-                marker.on('dragend', (e) => {
-                    const pos = e.target.getLatLng();
-                    points[i].lat = parseFloat(pos.lat.toFixed(6));
-                    points[i].lng = parseFloat(pos.lng.toFixed(6));
+                const marker = L.marker([point.lat, point.lng], { draggable: true }).addTo(map);
+                marker.bindPopup(`<b>${escapeHtml(point.id)}</b><br>${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`);
+                marker.on('dragend', (event) => {
+                    clearOptimizationState();
+                    const position = event.target.getLatLng();
+                    points[index].lat = roundCoord(position.lat);
+                    points[index].lng = roundCoord(position.lng);
                     renderUI();
                 });
                 markers.push(marker);
             });
         }
 
-        window.updatePoint = (i, f, v) => { points[i][f] = (f === 'id') ? v : parseFloat(v); renderUI(); };
-        window.deletePoint = (i) => { points.splice(i, 1); renderUI(); };
-        window.movePoint = (i, d) => {
-            const next = i + d;
-            if (next >= 0 && next < points.length) {
-                [points[i], points[next]] = [points[next], points[i]];
-                renderUI();
+        panelToggle.addEventListener('click', () => {
+            if (panelToggle.classList.contains('hidden')) {
+                return;
             }
-        };
-
-        // --- 4. API & Optimization Result ---
-        document.getElementById('btnOptimize').addEventListener('click', async function() {
-            this.innerText = "Processing...";
-            try {
-                const res = await fetch('/api/optimize', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ locations: points })
-                });
-                const data = await res.json();
-                
-                if (data.status === 'success') {
-                    // Update original points with their rank in the optimized path
-                    points.forEach(p => {
-                        const matchIndex = data.optimized_route.findIndex(opt => opt.id === p.id);
-                        p.rank = matchIndex + 1;
-                    });
-
-                    // Show Result Panel
-                    document.getElementById('resDist').innerText = data.metrics.distance_km + " km";
-                    document.getElementById('resTime').innerText = data.metrics.duration_minutes + " min";
-                    document.getElementById('resultPanel').classList.remove('hidden');
-                    
-                    renderUI();
-                }
-            } catch (e) { alert("Optimization Failed"); }
-            this.innerText = "🚀 Run Optimization";
+            setResultPanelVisible(resultPanel.classList.contains('hidden'));
         });
 
-        // File Import Handler
-        document.getElementById('fileInput').addEventListener('change', (e) => {
-            Papa.parse(e.target.files[0], {
-                header: true, skipEmptyLines: true,
-                complete: (results) => {
-                    results.data.forEach(row => {
-                        // Basic fuzzy logic for file headers
-                        const lat = row.lat || row.latitude || row.y;
-                        const lng = row.lng || row.longitude || row.x;
-                        const name = row.name || row.id || row.customer;
-                        if (lat && lng) addPoint(parseFloat(lat), parseFloat(lng), name);
+        document.getElementById('btnHidePanel').addEventListener('click', () => {
+            setResultPanelVisible(false);
+        });
+
+        let lastContextLatLng = null;
+        map.on('contextmenu', (event) => {
+            lastContextLatLng = event.latlng;
+            const menu = document.getElementById('contextMenu');
+            menu.style.display = 'block';
+            menu.style.left = event.containerPoint.x + 'px';
+            menu.style.top = event.containerPoint.y + 'px';
+        });
+
+        document.addEventListener('click', () => {
+            document.getElementById('contextMenu').style.display = 'none';
+        });
+
+        document.getElementById('ctxAddPoint').addEventListener('click', () => {
+            if (!lastContextLatLng) {
+                return;
+            }
+            addPoint(lastContextLatLng.lat, lastContextLatLng.lng);
+            setPlacementMode(false);
+        });
+
+        addModeBtn.addEventListener('click', () => {
+            setPlacementMode(!isPlacementMode);
+        });
+
+        map.on('mousemove', (event) => {
+            if (!isPlacementMode) {
+                return;
+            }
+
+            if (!previewMarker) {
+                previewMarker = L.circleMarker(event.latlng, {
+                    radius: 8,
+                    color: '#1d4ed8',
+                    weight: 2,
+                    fillColor: '#60a5fa',
+                    fillOpacity: 0.55
+                }).addTo(map);
+            }
+
+            previewMarker.setLatLng(event.latlng);
+        });
+
+        map.on('click', (event) => {
+            if (!isPlacementMode) {
+                return;
+            }
+
+            addPoint(event.latlng.lat, event.latlng.lng);
+            setPlacementMode(false);
+        });
+
+        window.updatePoint = (index, field, value) => {
+            if (!points[index]) {
+                return;
+            }
+
+            clearOptimizationState();
+
+            if (field === 'id') {
+                points[index].id = String(value).trim() || `Waypoint ${index + 1}`;
+                renderUI();
+                return;
+            }
+
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed)) {
+                renderUI();
+                return;
+            }
+
+            points[index][field] = roundCoord(parsed);
+            renderUI();
+        };
+
+        window.deletePoint = (index) => {
+            points.splice(index, 1);
+            clearOptimizationState();
+            renderUI();
+        };
+
+        window.movePoint = (index, direction) => {
+            const nextIndex = index + direction;
+            if (nextIndex < 0 || nextIndex >= points.length) {
+                return;
+            }
+
+            clearOptimizationState();
+            [points[index], points[nextIndex]] = [points[nextIndex], points[index]];
+            renderUI();
+        };
+
+        optimizeBtn.addEventListener('click', async function() {
+            this.disabled = true;
+            this.innerText = 'Processing...';
+
+            try {
+                const response = await fetch('/api/optimize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        locations: points.map((point) => ({
+                            id: point.routeKey,
+                            lat: point.lat,
+                            lng: point.lng
+                        }))
+                    })
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Optimization failed.');
+                }
+
+                if (data.status === 'success') {
+                    optimizedRoute = data.optimized_route.map((routePoint) => {
+                        const localPoint = points.find((point) => point.routeKey === routePoint.id);
+                        return {
+                            id: localPoint ? localPoint.id : routePoint.id,
+                            routeKey: routePoint.id,
+                            lat: routePoint.lat,
+                            lng: routePoint.lng
+                        };
                     });
+                    points.forEach((point) => {
+                        const rank = optimizedRoute.findIndex((routePoint) => routePoint.routeKey === point.routeKey);
+                        point.rank = rank >= 0 ? rank + 1 : null;
+                    });
+
+                    drawOptimizedRoute(optimizedRoute);
+                    updateResultPanel(data.metrics, optimizedRoute);
+                    renderUI();
+                    focusMapOnPoints(optimizedRoute);
+                }
+            } catch (error) {
+                alert(error.message || 'Optimization failed.');
+            } finally {
+                this.disabled = points.length < 2;
+                this.innerText = 'Run Optimization';
+            }
+        });
+
+        document.getElementById('fileInput').addEventListener('change', (event) => {
+            const [file] = event.target.files || [];
+            if (!file) {
+                return;
+            }
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: (results) => {
+                    const importedRows = results.data
+                        .map(normalizeRow)
+                        .filter(Boolean);
+
+                    if (!importedRows.length) {
+                        alert('No valid latitude/longitude rows were found in that file.');
+                        event.target.value = '';
+                        return;
+                    }
+
+                    clearOptimizationState();
+                    const importedPoints = [];
+                    importedRows.forEach((row) => {
+                        const point = createPoint(row.lat, row.lng, row.name, points.length + 1);
+                        points.push(point);
+                        importedPoints.push(point);
+                    });
+                    renderUI();
+                    focusMapOnPoints(importedPoints);
+                    event.target.value = '';
+                },
+                error: () => {
+                    alert('The file could not be read.');
+                    event.target.value = '';
                 }
             });
         });
+
+        renderUI();
     </script>
 </body>
 </html>
