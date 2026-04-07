@@ -1,117 +1,193 @@
-// 1. Initialize Map
-const map = L.map('map').setView([49.8951, -97.1384], 12);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-}).addTo(map);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Route Optimizer Dashboard</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
-// Global State
-let parsedData = []; // The raw data from the file
-let markers = [];    // The actual Leaflet marker objects
+    <style>
+        #map { height: 100%; width: 100%; z-index: 1; }
+    </style>
+</head>
+<body class="bg-gray-100 h-screen flex overflow-hidden">
 
-// --- 2. The Fuzzy Header Matcher ---
-function standardizeHeaders(row) {
-    const idAliases = ['id', 'name', 'title', 'location', 'stop', 'customer'];
-    const latAliases = ['lat', 'latitude', 'y', 'lat.', 'latitude_decimal'];
-    const lngAliases = ['lng', 'lon', 'longitude', 'x', 'long', 'longitude_decimal'];
+    <div class="w-1/3 bg-white shadow-lg flex flex-col z-10">
+        <div class="p-4 bg-blue-600 text-white font-bold text-xl flex justify-between items-center">
+            <span>Route Optimizer</span>
+            <span id="connectionStatus" class="text-xs bg-green-500 px-2 py-1 rounded">Online</span>
+        </div>
 
-    let cleanRow = { id: "Unknown", lat: null, lng: null };
+        <div class="p-4 border-b border-gray-200">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Upload Locations (CSV, JSON, TSV)</label>
+            <input type="file" id="fileInput" accept=".csv, .tsv, .json, .txt" 
+                   class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
+        </div>
 
-    for (const [key, value] of Object.entries(row)) {
-        const lowerKey = key.trim().toLowerCase();
-        if (idAliases.includes(lowerKey)) cleanRow.id = value;
-        if (latAliases.includes(lowerKey)) cleanRow.lat = parseFloat(value);
-        if (lngAliases.includes(lowerKey)) cleanRow.lng = parseFloat(value);
-    }
-    return cleanRow;
-}
+        <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+            <h3 class="font-semibold text-gray-700 mb-2 flex justify-between">
+                <span>Preview</span>
+                <span id="pointCount" class="text-blue-600">0 points</span>
+            </h3>
+            <ul id="previewList" class="space-y-2">
+                <li class="text-gray-400 italic text-sm text-center py-10">Waiting for file upload...</li>
+            </ul>
+        </div>
 
-// --- 3. File Input Listener ---
-document.getElementById('fileInput').addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: function(results) {
-            parsedData = results.data.map(standardizeHeaders).filter(r => r.lat && r.lng);
-            renderPreview();
-        }
-    });
-});
+        <div class="p-4 border-t border-gray-200 bg-white space-y-2">
+            <button id="btnLoadMap" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded shadow hidden transition-all">
+                📍 Load to Map
+            </button>
+            <button id="btnOptimize" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow opacity-50 cursor-not-allowed transition-all" disabled>
+                🚀 Optimize Route
+            </button>
+        </div>
+    </div>
 
-function renderPreview() {
-    const list = document.getElementById('previewList');
-    list.innerHTML = parsedData.map((p, i) => `
-        <li class="bg-white p-2 rounded shadow-sm border border-gray-200 flex justify-between text-xs">
-            <span>${i === 0 ? '🟢 ' : ''}${p.id}</span>
-            <span class="text-gray-400">${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</span>
-        </li>
-    `).join('');
-    document.getElementById('btnLoadMap').classList.remove('hidden');
-}
+    <div class="w-2/3 relative h-full">
+        <div id="map"></div>
+    </div>
 
-// --- 4. NEW: Load to Map Logic ---
-document.getElementById('btnLoadMap').addEventListener('click', function() {
-    // Clear existing markers
-    markers.forEach(m => map.removeLayer(m));
-    markers = [];
-
-    const bounds = [];
-
-    parsedData.forEach((point, index) => {
-        const marker = L.marker([point.lat, point.lng], {
-            draggable: true,
-            title: point.id
+    <script>
+        // 1. Initialize Map (Winnipeg Default)
+        const map = L.map('map').setView([49.8951, -97.1384], 12);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Add a popup so you can rename or see the ID
-        marker.bindPopup(`<b>${point.id}</b><br>Stop #${index}`);
+        // Global State
+        let parsedData = []; 
+        let markers = [];    
 
-        // Update data if you drag the pin!
-        marker.on('dragend', function(event) {
-            const newPos = event.target.getLatLng();
-            parsedData[index].lat = parseFloat(newPos.lat.toFixed(6));
-            parsedData[index].lng = parseFloat(newPos.lng.toFixed(6));
-            renderPreview(); // Sync the sidebar
-        });
+        // 2. The Fuzzy Header Matcher
+        function standardizeHeaders(row) {
+            const idAliases = ['id', 'name', 'title', 'location', 'stop', 'customer', 'label'];
+            const latAliases = ['lat', 'latitude', 'y', 'lat.', 'latitude_decimal', 'coords_lat'];
+            const lngAliases = ['lng', 'lon', 'longitude', 'x', 'long', 'longitude_decimal', 'coords_lng'];
 
-        markers.push(marker);
-        bounds.push([point.lat, point.lng]);
-    });
+            let cleanRow = { id: "Point " + Math.floor(Math.random() * 1000), lat: null, lng: null };
 
-    // Zoom the map to fit all your pins
-    if (bounds.length > 0) {
-        map.fitBounds(bounds, { padding: [50, 50] });
-    }
-
-    // Enable the Optimize button
-    const optBtn = document.getElementById('btnOptimize');
-    optBtn.disabled = false;
-    optBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-});
-
-// --- 5. NEW: The API Call (Trigger Optimization) ---
-document.getElementById('btnOptimize').addEventListener('click', async function() {
-    const btn = this;
-    btn.innerText = "Optimizing...";
-    
-    try {
-        const response = await fetch('/api/optimize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ locations: parsedData })
-        });
-
-        const result = await response.json();
-
-        if (result.status === 'success') {
-            alert(`Optimized! Total Distance: ${result.metrics.distance_km} km`);
-            // We'll add the "Draw Route Line" logic next!
-            console.log("Ordered Route:", result.optimized_route);
+            for (const [key, value] of Object.entries(row)) {
+                const lowerKey = key.trim().toLowerCase();
+                if (idAliases.includes(lowerKey) && value) cleanRow.id = value;
+                if (latAliases.includes(lowerKey)) cleanRow.lat = parseFloat(value);
+                if (lngAliases.includes(lowerKey)) cleanRow.lng = parseFloat(value);
+            }
+            return cleanRow;
         }
-    } catch (err) {
-        alert("Optimization failed. Check console.");
-        console.error(err);
-    } finally {
-        btn.innerText = "Optimize Route";
-    }
-});
+
+        // 3. File Input Listener
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            Papa.parse(file, {
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    parsedData = results.data
+                        .map(standardizeHeaders)
+                        .filter(r => !isNaN(r.lat) && !isNaN(r.lng));
+                    
+                    renderPreview();
+                }
+            });
+        });
+
+        function renderPreview() {
+            const list = document.getElementById('previewList');
+            const countLabel = document.getElementById('pointCount');
+            const loadBtn = document.getElementById('btnLoadMap');
+            
+            list.innerHTML = '';
+            countLabel.innerText = `${parsedData.length} points`;
+
+            parsedData.forEach((p, i) => {
+                const li = document.createElement('li');
+                li.className = "bg-white p-3 rounded-lg shadow-sm border border-gray-200 flex justify-between items-center text-xs";
+                li.innerHTML = `
+                    <div class="flex flex-col">
+                        <span class="font-bold text-gray-800">${i === 0 ? '🟢 ' : ''}${p.id}</span>
+                        <span class="text-gray-400 font-mono">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</span>
+                    </div>
+                `;
+                list.appendChild(li);
+            });
+
+            if (parsedData.length > 0) loadBtn.classList.remove('hidden');
+        }
+
+        // 4. Load to Map Logic
+        document.getElementById('btnLoadMap').addEventListener('click', function() {
+            // Clear old markers
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+
+            const bounds = [];
+
+            parsedData.forEach((point, index) => {
+                const marker = L.marker([point.lat, point.lng], {
+                    draggable: true,
+                    title: point.id
+                }).addTo(map);
+
+                marker.bindPopup(`<strong>${point.id}</strong><br>Drag to adjust location.`);
+
+                // Sync drag changes back to the data
+                marker.on('dragend', function(event) {
+                    const newPos = event.target.getLatLng();
+                    parsedData[index].lat = parseFloat(newPos.lat.toFixed(6));
+                    parsedData[index].lng = parseFloat(newPos.lng.toFixed(6));
+                    renderPreview(); 
+                });
+
+                markers.push(marker);
+                bounds.push([point.lat, point.lng]);
+            });
+
+            if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
+
+            // Enable Optimization
+            const optBtn = document.getElementById('btnOptimize');
+            optBtn.disabled = false;
+            optBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        });
+
+        // 5. Optimize Route API Call
+        document.getElementById('btnOptimize').addEventListener('click', async function() {
+            const btn = this;
+            const originalText = btn.innerText;
+            btn.innerText = "📐 Calculating Best Route...";
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/api/optimize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ locations: parsedData })
+                });
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    alert(`Route Optimized!\nDistance: ${result.metrics.distance_km} km\nEst. Time: ${result.metrics.duration_minutes} mins`);
+                    console.log("Optimal Order:", result.optimized_route);
+                } else {
+                    alert("Error: " + result.detail);
+                }
+            } catch (err) {
+                alert("Connection failed. Is the Docker container running?");
+            } finally {
+                btn.innerText = originalText;
+                btn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
