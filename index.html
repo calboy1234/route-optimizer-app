@@ -42,7 +42,7 @@
 
     <div id="sidebar" class="w-[460px] max-w-full bg-white shadow-xl flex flex-col z-10 border-r border-slate-300 transition-all duration-200 ease-out relative">
         <div class="sidebar-rail">Route Optimizer</div>
-        <button id="sidebarToggle" class="absolute -right-3 top-5 z-20 w-6 h-10 rounded-r-lg border border-slate-300 border-l-0 bg-white text-slate-600 shadow hover:text-blue-700" aria-label="Collapse sidebar">
+        <button id="sidebarToggle" class="absolute right-0 translate-x-full top-5 z-20 w-6 h-10 rounded-r-lg border border-slate-300 border-l-0 bg-white text-slate-600 shadow hover:text-blue-700" aria-label="Collapse sidebar">
             <span id="sidebarToggleIcon">&#9664;</span>
         </button>
         <div class="sidebar-content flex flex-col min-h-0 flex-1 transition-opacity duration-150">
@@ -448,6 +448,17 @@
             map.flyTo([point.lat, point.lng], Math.max(map.getZoom(), 18), { duration: 0.6 });
         }
 
+        function focusWaypoint(routeKey) {
+            if (isSidebarCollapsed) {
+                setSidebarCollapsed(false);
+            }
+
+            focusPointByRouteKey(routeKey);
+            setTimeout(() => {
+                highlightSidebarPoint(routeKey);
+            }, isSidebarCollapsed ? 240 : 0);
+        }
+
         function reorderPointsByRouteKey(movedRouteKey, targetRouteKey) {
             if (!movedRouteKey || !targetRouteKey || movedRouteKey === targetRouteKey) {
                 return;
@@ -497,7 +508,7 @@
                 document.getElementById('snapWarningList').innerHTML = snapWarnings
                     .sort((a, b) => b.distanceMeters - a.distanceMeters)
                     .map((point) => `
-                        <button type="button" onclick="focusPointByRouteKey('${point.routeKey}')" class="block w-full text-left rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5 hover:border-amber-300 hover:bg-white">
+                        <button type="button" onclick="focusWaypoint('${point.routeKey}')" class="block w-full text-left rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5 hover:border-amber-300 hover:bg-white">
                             <div class="text-[11px] font-semibold text-amber-900 break-words">${escapeHtml(point.id)}</div>
                             <div class="text-[11px] text-amber-800">${Math.round(point.distanceMeters)} m from snapped road point</div>
                         </button>
@@ -797,14 +808,15 @@
         };
 
         window.jumpToSidebarPoint = (routeKey) => {
-            if (isSidebarCollapsed) {
-                setSidebarCollapsed(false);
-            }
-            highlightSidebarPoint(routeKey);
+            focusWaypoint(routeKey);
         };
 
         window.focusPointByRouteKey = (routeKey) => {
             focusPointByRouteKey(routeKey);
+        };
+
+        window.focusWaypoint = (routeKey) => {
+            focusWaypoint(routeKey);
         };
 
         optimizeBtn.addEventListener('click', async function() {
