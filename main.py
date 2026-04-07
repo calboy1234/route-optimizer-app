@@ -39,6 +39,7 @@ class Point(BaseModel):
 class RouteRequest(BaseModel):
     locations: list[Point]
     optimize_for: Literal["time", "distance"] = "time"
+    must_end_at_last: bool = False
 
 # --- Core Logic ---
 def get_osrm_matrices(locations: list[Point]):
@@ -150,22 +151,24 @@ def expand_block_route(block_route_indices, blocks):
         expanded_route.extend(blocks[block_index]["indices"])
     return expanded_route
 
-def solve_tsp_open(cost_matrix):
+def solve_tsp_open(cost_matrix, fixed_end_node: int | None = None):
     """Solve the TSP as an Open Path (No return to start) using a Dummy Node"""
     num_real_nodes = len(cost_matrix)
-    num_total_nodes = num_real_nodes + 1 # Add 1 dummy node
-    
-    # Expand matrix with the Dummy Node
+    use_dummy_end = fixed_end_node is None
+    num_total_nodes = num_real_nodes + 1 if use_dummy_end else num_real_nodes
+
     expanded_matrix = []
     for i in range(num_real_nodes):
         row = [int(x) for x in cost_matrix[i]]
-        row.append(0) 
+        if use_dummy_end:
+            row.append(0)
         expanded_matrix.append(row)
-        
-    expanded_matrix.append([0] * num_total_nodes)
 
-    # Setup OR-Tools (Starts at 0, Ends at the Dummy Node)
-    manager = pywrapcp.RoutingIndexManager(num_total_nodes, 1, [0], [num_real_nodes])
+    if use_dummy_end:
+        expanded_matrix.append([0] * num_total_nodes)
+
+    end_node = num_real_nodes if use_dummy_end else fixed_end_node
+    manager = pywrapcp.RoutingIndexManager(num_total_nodes, 1, [0], [end_node])
     routing = pywrapcp.RoutingModel(manager)
 
     def distance_callback(from_index, to_index):
@@ -220,7 +223,19 @@ def optimize_route(request: RouteRequest):
         optimization_matrix = duration_matrix if request.optimize_for == "time" else distance_matrix
         locked_blocks = build_locked_blocks(request.locations)
         block_optimization_matrix = build_block_cost_matrix(locked_blocks, optimization_matrix)
-        optimal_block_indices = [0] if len(locked_blocks) == 1 else solve_tsp_open(block_optimization_matrix)
+        fixed_end_block_index = None
+        if request.must_end_at_last:
+            last_point_index = len(request.locations) - 1
+            fixed_end_block_index = next(
+                (
+                    block_index
+                    for block_index, block in enumerate(locked_blocks)
+                    if last_point_index in block["indices"]
+                ),
+                None
+            )
+
+        optimal_block_indices = [0] if len(locked_blocks) == 1 else solve_tsp_open(block_optimization_matrix, fixed_end_block_index)
         
         if not optimal_block_indices:
             raise HTTPException(status_code=500, detail="Could not find a mathematical solution.")
@@ -255,6 +270,7 @@ def optimize_route(request: RouteRequest):
             "status": "success",
             "point_count": len(ordered_locations),
             "optimize_for": request.optimize_for,
+            "must_end_at_last": request.must_end_at_last,
             "metrics": metrics,
             "optimized_route": ordered_locations,
             "road_geometry": road_geometry
