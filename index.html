@@ -293,8 +293,41 @@
         }
 
         function extractCoordinate(value) {
-            const parsed = typeof value === 'number' ? value : Number(String(value ?? '').trim());
-            return Number.isFinite(parsed) ? parsed : null;
+            if (typeof value === 'number') {
+                return Number.isFinite(value) ? value : null;
+            }
+
+            const text = String(value ?? '').trim();
+            if (!text) {
+                return null;
+            }
+
+            const direct = Number(text);
+            if (Number.isFinite(direct)) {
+                return direct;
+            }
+
+            const cleaned = text
+                .replace(/\s+/g, '')
+                .replace(/,/g, '')
+                .replace(/º/g, '°');
+
+            const match = cleaned.match(/^(-?\d+(?:\.\d+)?)°?([NSEW])?$/i);
+            if (!match) {
+                return null;
+            }
+
+            let numeric = Number(match[1]);
+            if (!Number.isFinite(numeric)) {
+                return null;
+            }
+
+            const direction = (match[2] || '').toUpperCase();
+            if (direction === 'S' || direction === 'W') {
+                numeric *= -1;
+            }
+
+            return numeric;
         }
 
         function normalizeRow(row) {
