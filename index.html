@@ -72,6 +72,27 @@
             font-weight: 800;
             line-height: 1;
         }
+        .waypoint-rank-badge {
+            position: absolute;
+            top: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 9999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.88);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.92);
+            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.25);
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+        }
         .overlay-icon {
             display: inline-flex;
             align-items: center;
@@ -436,7 +457,7 @@
         }
 
         function createWaypointMarkerIcon(options = {}) {
-            const { isStart = false, isIncluded = true } = options;
+            const { isStart = false, isIncluded = true, rank = null } = options;
             const fillColor = !isIncluded
                 ? '#94a3b8'
                 : isStart
@@ -446,10 +467,13 @@
             return L.divIcon({
                 className: '',
                 html: `
-                    <svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                        <path d="M12 1.5C6.2 1.5 1.5 6.2 1.5 12c0 8.2 10.5 22.5 10.5 22.5S22.5 20.2 22.5 12C22.5 6.2 17.8 1.5 12 1.5Z" fill="${fillColor}" stroke="rgba(255,255,255,0.96)" stroke-width="2"/>
-                        <circle cx="12" cy="12" r="4.2" fill="rgba(255,255,255,0.96)"/>
-                    </svg>
+                    <div style="position: relative; width: 24px; height: 36px;">
+                        ${Number.isFinite(rank) ? `<span class="waypoint-rank-badge">${rank}</span>` : ''}
+                        <svg width="24" height="36" viewBox="0 0 24 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <path d="M12 1.5C6.2 1.5 1.5 6.2 1.5 12c0 8.2 10.5 22.5 10.5 22.5S22.5 20.2 22.5 12C22.5 6.2 17.8 1.5 12 1.5Z" fill="${fillColor}" stroke="rgba(255,255,255,0.96)" stroke-width="2"/>
+                            <circle cx="12" cy="12" r="4.2" fill="rgba(255,255,255,0.96)"/>
+                        </svg>
+                    </div>
                 `,
                 iconSize: [24, 36],
                 iconAnchor: [12, 35],
@@ -736,6 +760,9 @@
             inclusionZoneVertices = [];
             includedRouteKeys = new Set();
             inclusionZoneCursorLatLng = null;
+            map.getContainer().style.cursor = isPlacementMode ? 'crosshair' : '';
+            cursorVertical.classList.toggle('hidden', !isPlacementMode);
+            cursorHorizontal.classList.toggle('hidden', !isPlacementMode);
             clearOptimizationState();
             clearInclusionZoneLayers();
             syncZoneStatus();
@@ -938,7 +965,9 @@
                 drivingPathSegments.push(segment);
             }
 
-            const minArrowSpacingMeters = 900;
+            const zoom = map.getZoom();
+            const arrowSize = Math.max(10, Math.min(16, zoom + 1));
+            const minArrowSpacingMeters = zoom <= 8 ? 3200 : zoom <= 10 ? 2200 : zoom <= 12 ? 1400 : 900;
             let distanceSinceLastArrow = 0;
 
             for (let index = 0; index < drivingPathGeometry.length - 1; index += 1) {
@@ -972,12 +1001,12 @@
                     icon: L.divIcon({
                         className: '',
                         html: `
-                            <div class="driving-path-arrow-badge" style="transform: rotate(${angle}deg);">
-                                <span class="driving-path-arrow-glyph">&#8250;</span>
+                            <div class="driving-path-arrow-badge" style="width:${arrowSize}px;height:${arrowSize}px;transform: rotate(${angle}deg);">
+                                <span class="driving-path-arrow-glyph" style="font-size:${Math.max(8, arrowSize - 7)}px;">&#8250;</span>
                             </div>
                         `,
-                        iconSize: [20, 20],
-                        iconAnchor: [10, 10]
+                        iconSize: [arrowSize, arrowSize],
+                        iconAnchor: [arrowSize / 2, arrowSize / 2]
                     })
                 }).addTo(map);
 
@@ -1314,7 +1343,7 @@
                 const marker = L.marker([point.lat, point.lng], {
                     draggable: true,
                     opacity: included ? 1 : 0.45,
-                    icon: createWaypointMarkerIcon({ isStart, isIncluded: included })
+                    icon: createWaypointMarkerIcon({ isStart, isIncluded: included, rank: point.rank })
                 }).addTo(map);
                 marker.bindPopup(`
                     <div class="min-w-[150px]">
@@ -1440,6 +1469,12 @@
             }
             inclusionZoneCursorLatLng = null;
             redrawInclusionZone({ preserveEditor: true });
+        });
+
+        map.on('zoomend', () => {
+            if (showDrivingPath && drivingPathGeometry.length >= 2) {
+                drawDrivingPath();
+            }
         });
 
         map.on('click', (event) => {
