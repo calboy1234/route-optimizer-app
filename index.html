@@ -152,7 +152,6 @@
         let isPlacementMode = false;
         let nextPointKey = 1;
         let hasSummary = false;
-        let sidebarHighlightTimeout = null;
         let lastFocusedBounds = null;
         let draggedRouteKey = null;
         let isSidebarCollapsed = false;
@@ -447,79 +446,12 @@
             });
         }
 
-        function highlightSidebarPoint(routeKey) {
-            const row = document.querySelector(`[data-route-key="${routeKey}"]`);
-            if (!row) {
-                return;
-            }
-
-            const targetTop = Math.max(row.offsetTop - 24, 0);
-            pointContainer.scrollTo({ top: targetTop, behavior: 'smooth' });
-            row.classList.add('ring-2', 'ring-blue-400', 'bg-blue-50');
-
-            if (sidebarHighlightTimeout) {
-                clearTimeout(sidebarHighlightTimeout);
-            }
-
-            sidebarHighlightTimeout = setTimeout(() => {
-                row.classList.remove('ring-2', 'ring-blue-400', 'bg-blue-50');
-                sidebarHighlightTimeout = null;
-            }, 1400);
-        }
-
         function setSidebarCollapsed(collapsed) {
             isSidebarCollapsed = collapsed;
             sidebar.classList.toggle('sidebar-collapsed', collapsed);
             sidebarToggleIcon.innerHTML = collapsed ? '&#9654;' : '&#9664;';
             sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
             setTimeout(() => map.invalidateSize(), SIDEBAR_RESIZE_DELAY_MS);
-        }
-
-        function focusPointByRouteKey(routeKey) {
-            const point = points.find((entry) => entry.routeKey === routeKey);
-            if (!point) {
-                return;
-            }
-
-            map.flyTo([point.lat, point.lng], Math.max(map.getZoom(), 18), { duration: MAP_FOCUS_DURATION_SECONDS });
-            const marker = markerLookup.get(routeKey);
-            if (marker) {
-                const openPopup = () => {
-                    map.off('moveend', openPopup);
-                    if (markerLookup.get(routeKey) === marker) {
-                        marker.openPopup();
-                    }
-                };
-
-                map.once('moveend', openPopup);
-                setTimeout(() => {
-                    if (markerLookup.get(routeKey) !== marker) {
-                        map.off('moveend', openPopup);
-                        return;
-                    }
-
-                    if (typeof marker.isPopupOpen === 'function' && marker.isPopupOpen()) {
-                        return;
-                    }
-
-                    openPopup();
-                }, Math.round(MAP_FOCUS_DURATION_SECONDS * 1000) + 120);
-            }
-        }
-
-        function handleFocusWaypoint(routeKey) {
-            const focusAndHighlight = () => {
-                focusPointByRouteKey(routeKey);
-                highlightSidebarPoint(routeKey);
-            };
-
-            if (isSidebarCollapsed) {
-                setSidebarCollapsed(false);
-                setTimeout(focusAndHighlight, SIDEBAR_RESIZE_DELAY_MS + 20);
-                return;
-            }
-
-            focusAndHighlight();
         }
 
         function reorderPointsByRouteKey(movedRouteKey, targetRouteKey) {
@@ -571,10 +503,10 @@
                 document.getElementById('snapWarningList').innerHTML = snapWarnings
                     .sort((a, b) => b.distanceMeters - a.distanceMeters)
                     .map((point) => `
-                        <button type="button" onclick="window.focusWaypointEntry('${point.routeKey}')" class="block w-full text-left rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5 hover:border-amber-300 hover:bg-white">
+                        <div class="rounded-lg border border-amber-200 bg-white/70 px-2 py-1.5">
                             <div class="text-[11px] font-semibold text-amber-900 break-words">${escapeHtml(point.id)}</div>
                             <div class="text-[11px] text-amber-800">${Math.round(point.distanceMeters)} m from snapped road point</div>
-                        </button>
+                        </div>
                     `)
                     .join('');
                 snapWarningBox.classList.remove('hidden');
@@ -779,9 +711,6 @@
                     <div class="min-w-[150px]">
                         <div class="font-semibold">${escapeHtml(point.id)}</div>
                         <div class="text-[11px] text-slate-500">${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}</div>
-                        <button onclick="window.jumpToSidebarPoint('${point.routeKey}')" class="mt-2 px-2 py-1 text-[11px] rounded border border-slate-300 text-slate-700 hover:border-blue-300 hover:text-blue-700">
-                            Jump to sidebar
-                        </button>
                     </div>
                 `, { autoPan: false });
                 marker.on('dragend', (event) => {
@@ -880,18 +809,6 @@
             clearOptimizationState();
             [points[index], points[nextIndex]] = [points[nextIndex], points[index]];
             renderUI();
-        };
-
-        window.jumpToSidebarPoint = (routeKey) => {
-            handleFocusWaypoint(routeKey);
-        };
-
-        window.focusPointByRouteKey = (routeKey) => {
-            focusPointByRouteKey(routeKey);
-        };
-
-        window.focusWaypointEntry = (routeKey) => {
-            handleFocusWaypoint(routeKey);
         };
 
         optimizeBtn.addEventListener('click', async function() {
