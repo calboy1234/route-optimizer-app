@@ -120,6 +120,26 @@
             font-size: 12px;
             font-weight: 600;
         }
+        .toolbar-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 34px;
+            padding: 0 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+        }
+        .toolbar-button-ghost {
+            border: 1px solid rgba(100, 116, 139, 0.45);
+            background: rgba(15, 23, 42, 0.28);
+            color: #e2e8f0;
+        }
+        .toolbar-button-ghost:hover {
+            background: rgba(51, 65, 85, 0.8);
+        }
     </style>
 </head>
 <body class="bg-slate-100 h-screen flex overflow-hidden text-slate-800">
@@ -130,37 +150,46 @@
             <span id="sidebarToggleIcon">&#9664;</span>
         </button>
         <div class="sidebar-content flex flex-col min-h-0 flex-1 transition-opacity duration-150">
-        <div class="p-4 bg-slate-900 text-white border-b border-slate-700">
-            <div class="rounded-2xl border border-slate-700/80 bg-slate-950/40 p-4 shadow-lg space-y-4">
-                <div class="space-y-1">
-                    <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-blue-300">Trip Planner</p>
-                    <h1 class="font-bold tracking-tight text-2xl text-white">Route Optimizer</h1>
-                    <p class="text-sm text-slate-300 max-w-[28rem]">Build a multi-stop driving plan, shape the inclusion zone, and compare the ideal trip by fastest travel time or shortest driving distance.</p>
+        <div class="p-3 bg-slate-900 text-white border-b border-slate-700">
+            <div class="rounded-2xl border border-slate-700/80 bg-slate-950/40 p-3 shadow-lg space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="text-[10px] font-semibold uppercase tracking-[0.28em] text-blue-300">Trip Planner</p>
+                        <h1 class="font-bold tracking-tight text-xl text-white leading-tight">Route Optimizer</h1>
+                        <p class="text-xs text-slate-300 mt-1 max-w-[19rem]">Build a multi-stop route, shape the inclusion zone, and optimize by time or distance.</p>
+                    </div>
+                    <div class="rounded-xl border border-slate-700 bg-slate-950/80 px-2.5 py-2 text-right shrink-0">
+                        <p class="text-[10px] uppercase tracking-[0.22em] text-slate-500">Included</p>
+                        <p class="text-sm font-semibold text-white">Waypoints</p>
+                    </div>
                 </div>
 
-                <div class="flex flex-wrap gap-2">
-                    <button id="btnAddMode" class="bg-blue-600 hover:bg-blue-500 px-3 py-2 rounded-xl text-xs font-bold transition">Add Waypoint</button>
-                    <button id="btnZoneMode" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-2 rounded-xl text-xs font-bold transition">Draw Inclusion Zone</button>
-                    <button id="btnClearZone" class="hidden bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Clear Zone</button>
-                    <button id="btnExportProject" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Export Project</button>
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btnAddMode" class="toolbar-button bg-blue-600 hover:bg-blue-500 text-white">Add Waypoint</button>
+                    <button id="btnZoneMode" class="toolbar-button bg-emerald-600 hover:bg-emerald-500 text-white">Draw Zone</button>
+                    <button id="btnExportProject" class="toolbar-button toolbar-button-ghost">Export Project</button>
                     <input type="file" id="fileInput" class="hidden" accept=".csv,.json,application/json,text/csv">
-                    <button onclick="document.getElementById('fileInput').click()" class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded-xl text-xs font-bold transition">Import File</button>
+                    <button onclick="document.getElementById('fileInput').click()" class="toolbar-button toolbar-button-ghost">Import File</button>
                 </div>
 
-                <div class="rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-3">
-                    <div class="flex items-center justify-between gap-3 flex-wrap">
+                <div class="hidden" id="zoneActionRow">
+                    <button id="btnClearZone" class="toolbar-button toolbar-button-ghost w-full">Clear Zone</button>
+                </div>
+
+                <div class="rounded-xl border border-slate-700 bg-slate-900/60 px-3 py-2.5">
+                    <div class="flex items-center justify-between gap-2">
                         <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Optimize For</p>
-                            <p class="text-xs text-slate-400 mt-1">Choose the route objective before running optimization.</p>
+                            <p class="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">Optimize</p>
+                            <p class="text-[11px] text-slate-400">Choose the trip goal.</p>
                         </div>
-                        <div class="inline-flex rounded-xl border border-slate-700 bg-slate-950 p-1">
+                        <div class="inline-flex rounded-xl border border-slate-700 bg-slate-950 p-1 shrink-0">
                             <button id="optimizeTimeBtn" type="button" class="px-3 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white transition">Least Time</button>
                             <button id="optimizeDistanceBtn" type="button" class="px-3 py-2 rounded-lg text-xs font-bold text-slate-300 transition">Least Distance</button>
                         </div>
                     </div>
-                    <label class="mt-3 flex items-center gap-2 text-xs text-slate-300">
+                    <label class="mt-2.5 flex items-center gap-2 text-[11px] text-slate-300">
                         <input id="toggleMustEndLast" type="checkbox" class="rounded border-slate-600 text-blue-600">
-                        <span>Must end at last waypoint in list</span>
+                        <span>End at last waypoint</span>
                     </label>
                 </div>
             </div>
@@ -316,6 +345,7 @@
         const cursorHorizontal = document.getElementById('cursorHorizontal');
         const placementHintText = placementHint.querySelector('div');
         const zoneStatus = document.getElementById('zoneStatus');
+        const zoneActionRow = document.getElementById('zoneActionRow');
         const markerLookup = new Map();
         const SIDEBAR_RESIZE_DELAY_MS = 220;
         const MAP_FOCUS_DURATION_SECONDS = 0.6;
@@ -507,6 +537,14 @@
             return routePoints.filter((point) => !isRoutingOnlyPoint(point));
         }
 
+        function buildVisibleRouteRankLookup(routePoints = optimizedRoute) {
+            const rankLookup = new Map();
+            getVisibleRoutePoints(routePoints).forEach((point, index) => {
+                rankLookup.set(point.routeKey, index + 1);
+            });
+            return rankLookup;
+        }
+
         function createWaypointMarkerIcon(options = {}) {
             const { isStart = false, isIncluded = true, rank = null, isRoutingOnly = false } = options;
             const fillColor = isRoutingOnly
@@ -676,6 +714,7 @@
         function syncZoneStatus() {
             const includedCount = getIncludedPoints().length;
             if (isZonePlacementMode) {
+                zoneActionRow.classList.add('hidden');
                 zoneStatus.classList.remove('hidden');
                 if (!inclusionZoneVertices.length) {
                     zoneStatus.innerText = 'Click on the map to place the first inclusion-zone corner.';
@@ -690,12 +729,14 @@
             }
 
             if (hasInclusionZone()) {
+                zoneActionRow.classList.remove('hidden');
                 zoneStatus.classList.remove('hidden');
                 zoneStatus.innerText = `${includedCount} of ${points.length} waypoint${points.length === 1 ? '' : 's'} inside the inclusion zone. Drag green handles to refine it or click white midpoint dots to add corners.`;
-                clearZoneBtn.classList.add('hidden');
+                clearZoneBtn.classList.remove('hidden');
                 return;
             }
 
+            zoneActionRow.classList.add('hidden');
             zoneStatus.classList.add('hidden');
             zoneStatus.innerText = '';
             clearZoneBtn.classList.add('hidden');
@@ -1831,11 +1872,13 @@
                         };
                     });
                     drivingPathGeometry = Array.isArray(data.road_geometry) ? data.road_geometry : [];
-                    let visibleRank = 1;
+                    const optimizedPointLookup = new Map(
+                        optimizedRoute.map((routePoint) => [routePoint.routeKey, routePoint])
+                    );
+                    const visibleRouteRankLookup = buildVisibleRouteRankLookup(optimizedRoute);
                     points.forEach((point) => {
-                        const optimizedPoint = optimizedRoute.find((routePoint) => routePoint.routeKey === point.routeKey);
-                        const isVisibleStop = optimizedPoint && !isRoutingOnlyPoint(optimizedPoint);
-                        point.rank = isVisibleStop ? visibleRank++ : null;
+                        const optimizedPoint = optimizedPointLookup.get(point.routeKey);
+                        point.rank = visibleRouteRankLookup.get(point.routeKey) || null;
                         point.snapped = optimizedPoint ? optimizedPoint.snapped : null;
                     });
 
