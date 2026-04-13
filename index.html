@@ -140,6 +140,43 @@
         .toolbar-button-ghost:hover {
             background: rgba(51, 65, 85, 0.8);
         }
+        /* ── Export mode ── */
+        .export-handle-corner {
+            display: block;
+            width: 12px;
+            height: 12px;
+            background: #7c3aed;
+            border: 3px solid #fff;
+            border-radius: 3px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            cursor: grab;
+        }
+        .export-handle-edge {
+            display: block;
+            width: 10px;
+            height: 10px;
+            background: #fff;
+            border: 2px solid #7c3aed;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.28);
+            cursor: grab;
+        }
+        .export-handle-center {
+            display: block;
+            width: 18px;
+            height: 18px;
+            background: rgba(124,58,237,0.18);
+            border: 2px solid #7c3aed;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.22);
+            cursor: move;
+        }
+        .export-style-btn-active  { border-color: #7c3aed !important; background: #f5f3ff !important; color: #6d28d9 !important; }
+        .export-style-btn-default { border-color: #e2e8f0; background: #fff; color: #475569; }
+        .export-style-btn-default:hover { border-color: #c4b5fd; }
+        .export-res-btn-active    { border-color: #7c3aed !important; background: #f5f3ff !important; color: #6d28d9 !important; }
+        .export-res-btn-default   { border-color: #e2e8f0; background: #fff; color: #475569; }
+        .export-res-btn-default:hover { border-color: #c4b5fd; }
     </style>
 </head>
 <body class="bg-slate-100 h-screen flex overflow-hidden text-slate-800">
@@ -150,7 +187,7 @@
             <span id="sidebarToggleIcon">&#9664;</span>
         </button>
         <div class="sidebar-content flex flex-col min-h-0 flex-1 transition-opacity duration-150">
-        <div class="p-3 bg-slate-900 text-white border-b border-slate-700">
+        <div id="mainSidebarHeader" class="p-3 bg-slate-900 text-white border-b border-slate-700">
             <div class="rounded-2xl border border-slate-700/80 bg-slate-950/40 p-3 shadow-lg space-y-3">
                 <div class="flex items-start justify-between gap-3">
                     <div class="min-w-0">
@@ -170,6 +207,7 @@
                     <button id="btnExportProject" class="toolbar-button toolbar-button-ghost">Export Project</button>
                     <input type="file" id="fileInput" class="hidden" accept=".csv,.json,application/json,text/csv">
                     <button onclick="document.getElementById('fileInput').click()" class="toolbar-button toolbar-button-ghost">Import File</button>
+                    <button id="btnExportMap" class="toolbar-button col-span-2 bg-violet-700 hover:bg-violet-600 text-white">Export Map Image</button>
                 </div>
 
                 <div class="hidden" id="zoneActionRow">
@@ -197,12 +235,163 @@
 
         <div id="pointContainer" class="flex-1 overflow-y-auto p-2 space-y-1 bg-slate-50"></div>
 
-        <div class="p-4 bg-white border-t border-slate-200 space-y-2">
+        <div id="mainSidebarFooter" class="p-4 bg-white border-t border-slate-200 space-y-2">
             <div id="zoneStatus" class="hidden rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800"></div>
             <button id="btnOptimize" class="w-full bg-blue-700 hover:bg-blue-800 text-white font-bold py-3 rounded-xl shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                 Run Optimization
             </button>
         </div>
+
+        <!-- ══ EXPORT MODE PANEL ══════════════════════════════════════════════ -->
+        <div id="exportModePanel" class="hidden flex-col min-h-0 flex-1">
+
+            <!-- Header -->
+            <div class="p-3 bg-slate-900 text-white border-b border-slate-700 shrink-0">
+                <div class="flex items-center justify-between mb-1">
+                    <div>
+                        <p class="text-[10px] font-semibold uppercase tracking-[0.28em] text-violet-300">Map Export</p>
+                        <h2 class="font-bold text-lg text-white leading-tight">Export Image</h2>
+                    </div>
+                    <button id="btnExitExport" class="text-xs text-slate-300 hover:text-white border border-slate-600 rounded-lg px-3 py-2 font-semibold transition">← Back</button>
+                </div>
+                <p class="text-xs text-slate-400">Drag the purple box on the map to set the export area.</p>
+            </div>
+
+            <!-- Scrollable controls -->
+            <div class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50">
+
+                <!-- Bounds display -->
+                <div class="rounded-xl border border-slate-200 bg-white p-3">
+                    <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Export Bounds</p>
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+                        <div class="flex items-center justify-between"><span class="text-slate-400">North</span><span id="exportNorth" class="font-mono text-slate-700">--</span></div>
+                        <div class="flex items-center justify-between"><span class="text-slate-400">South</span><span id="exportSouth" class="font-mono text-slate-700">--</span></div>
+                        <div class="flex items-center justify-between"><span class="text-slate-400">West</span><span id="exportWest"  class="font-mono text-slate-700">--</span></div>
+                        <div class="flex items-center justify-between"><span class="text-slate-400">East</span><span id="exportEast"  class="font-mono text-slate-700">--</span></div>
+                    </div>
+                </div>
+
+                <!-- Map Style -->
+                <div class="rounded-xl border border-slate-200 bg-white p-3">
+                    <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-2">Map Style</p>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        <button class="export-style-btn py-2 text-xs font-semibold rounded-lg border transition" data-style="voyager">Voyager</button>
+                        <button class="export-style-btn py-2 text-xs font-semibold rounded-lg border transition" data-style="light">Light</button>
+                        <button class="export-style-btn py-2 text-xs font-semibold rounded-lg border transition" data-style="dark">Dark</button>
+                        <button class="export-style-btn py-2 text-xs font-semibold rounded-lg border transition" data-style="streets">Streets</button>
+                    </div>
+                </div>
+
+                <!-- Route controls -->
+                <div class="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
+                    <div class="flex items-center justify-between">
+                        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Route</p>
+                        <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                            <input id="exportShowRoute" type="checkbox" checked class="rounded border-slate-300 text-violet-600">
+                            <span>Visible</span>
+                        </label>
+                    </div>
+                    <div id="exportRouteControls" class="grid grid-cols-2 gap-2 transition-opacity">
+                        <div>
+                            <p class="text-[9px] text-slate-400 mb-1">Color</p>
+                            <input id="exportRouteColor" type="color" value="#2563eb" class="w-full h-8 rounded border border-slate-200 cursor-pointer">
+                        </div>
+                        <div>
+                            <p class="text-[9px] text-slate-400 mb-1">Thickness — <span id="exportRouteThicknessVal">4</span>px</p>
+                            <input id="exportRouteThickness" type="range" min="1" max="16" value="4" class="w-full accent-violet-600">
+                        </div>
+                        <div>
+                            <p class="text-[9px] text-slate-400 mb-1">Opacity — <span id="exportRouteOpacityVal">85</span>%</p>
+                            <input id="exportRouteOpacity" type="range" min="10" max="100" value="85" class="w-full accent-violet-600">
+                        </div>
+                        <div class="flex items-center gap-2 pt-3">
+                            <input id="exportRouteDashed" type="checkbox" class="rounded border-slate-300 text-violet-600">
+                            <label for="exportRouteDashed" class="text-xs text-slate-600 cursor-pointer">Dashed line</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Waypoint controls -->
+                <div class="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
+                    <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Waypoints</p>
+                    <div>
+                        <p class="text-[9px] text-slate-400 mb-1">Visibility</p>
+                        <select id="exportPointVisibility" class="compact-input w-full">
+                            <option value="all">Show all waypoints</option>
+                            <option value="start_end">Start &amp; end only</option>
+                            <option value="none">Hidden</option>
+                        </select>
+                    </div>
+                    <div id="exportPointControls" class="grid grid-cols-2 gap-2 transition-opacity">
+                        <div>
+                            <p class="text-[9px] text-slate-400 mb-1">Color</p>
+                            <input id="exportPointColor" type="color" value="#2563eb" class="w-full h-8 rounded border border-slate-200 cursor-pointer">
+                        </div>
+                        <div>
+                            <p class="text-[9px] text-slate-400 mb-1">Size — <span id="exportPointSizeVal">9</span>px</p>
+                            <input id="exportPointSize" type="range" min="4" max="32" value="9" class="w-full accent-violet-600">
+                        </div>
+                        <div class="col-span-2 flex items-center gap-2">
+                            <input id="exportShowLabels" type="checkbox" checked class="rounded border-slate-300 text-violet-600">
+                            <label for="exportShowLabels" class="text-xs text-slate-600 cursor-pointer">Show waypoint labels</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Resolution & format -->
+                <div class="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
+                    <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Output</p>
+                    <div>
+                        <p class="text-[9px] text-slate-400 mb-1.5">Resolution presets</p>
+                        <div class="grid grid-cols-3 gap-1.5">
+                            <button class="export-res-btn py-2 text-xs font-semibold rounded-lg border transition" data-w="1024" data-h="1024">1K</button>
+                            <button class="export-res-btn py-2 text-xs font-semibold rounded-lg border transition" data-w="2048" data-h="2048">2K</button>
+                            <button class="export-res-btn py-2 text-xs font-semibold rounded-lg border transition" data-w="4096" data-h="4096">4K</button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <p class="text-[9px] text-slate-400 mb-1">Width (px)</p>
+                            <input id="exportWidth" type="number" value="2048" min="256" max="8192" class="compact-input w-full">
+                        </div>
+                        <div>
+                            <p class="text-[9px] text-slate-400 mb-1">Height (px)</p>
+                            <input id="exportHeight" type="number" value="2048" min="256" max="8192" class="compact-input w-full">
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-[9px] text-slate-400 mb-1">File format</p>
+                        <select id="exportFormat" class="compact-input w-full">
+                            <option value="png">PNG (lossless)</option>
+                            <option value="jpeg">JPEG (smaller file)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Preview -->
+                <div class="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Preview</p>
+                        <button id="btnPreview" class="text-xs font-semibold text-violet-600 hover:text-violet-700">Generate</button>
+                    </div>
+                    <div id="exportPreviewContainer" class="relative bg-slate-100 rounded-lg overflow-hidden" style="min-height:160px;">
+                        <p id="exportPreviewPlaceholder" class="absolute inset-0 flex items-center justify-center text-xs text-slate-400 text-center p-4">Click Generate to see a low-res preview</p>
+                        <img id="exportPreviewImg" class="hidden w-full h-full object-contain" alt="Export preview">
+                    </div>
+                </div>
+
+            </div><!-- /scrollable controls -->
+
+            <!-- Download footer -->
+            <div class="p-3 bg-white border-t border-slate-200 space-y-2 shrink-0">
+                <button id="btnDownloadExport" class="w-full bg-violet-700 hover:bg-violet-800 text-white font-bold py-3 rounded-xl shadow transition-all text-sm">
+                    Download Image
+                </button>
+                <p id="exportStatusMsg" class="text-xs text-center text-slate-400 hidden"></p>
+            </div>
+
+        </div><!-- /exportModePanel -->
+
         </div>
     </div>
 
@@ -1958,6 +2147,371 @@
 
         updateOptimizationModeButtons();
         renderUI();
+
+        // ══════════════════════════════════════════════════════════════════════
+        // EXPORT MODE
+        // ══════════════════════════════════════════════════════════════════════
+
+        let isExportMode        = false;
+        let exportBounds        = { north: 0, south: 0, east: 0, west: 0 };
+        let exportBboxGroup     = null;
+        let exportMapStyle      = 'voyager';
+        let exportWidth         = 2048;
+        let exportHeight        = 2048;
+        let exportFormat        = 'png';
+        let exportShowRoute     = true;
+        let exportRouteColor    = '#2563eb';
+        let exportRouteThickness= 4;
+        let exportRouteOpacity  = 85;   // 0–100 range in UI, divided by 100 when sent
+        let exportRouteDashed   = false;
+        let exportPointVis      = 'all';
+        let exportPointColor    = '#2563eb';
+        let exportPointSize     = 9;
+        let exportShowLabels    = true;
+
+        // ── Bounding box editor ──────────────────────────────────────────────
+
+        function _computeInitialExportBounds() {
+            const src = drivingPathGeometry.length >= 2 ? drivingPathGeometry
+                      : optimizedRoute.length           ? optimizedRoute
+                      : points;
+            if (!src.length) {
+                const c = map.getCenter();
+                const s = 0.025;
+                return { north: c.lat + s, south: c.lat - s, east: c.lng + s * 1.6, west: c.lng - s * 1.6 };
+            }
+            let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
+            src.forEach(p => {
+                minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
+                minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
+            });
+            const latPad = Math.max((maxLat - minLat) * 0.18, 0.006);
+            const lngPad = Math.max((maxLng - minLng) * 0.18, 0.006);
+            return {
+                north: Math.min(85,   maxLat + latPad),
+                south: Math.max(-85,  minLat - latPad),
+                east:  Math.min(180,  maxLng + lngPad),
+                west:  Math.max(-180, minLng - lngPad),
+            };
+        }
+
+        function _updateExportBoundsDisplay() {
+            const f = v => v.toFixed(6);
+            document.getElementById('exportNorth').textContent = f(exportBounds.north);
+            document.getElementById('exportSouth').textContent = f(exportBounds.south);
+            document.getElementById('exportEast').textContent  = f(exportBounds.east);
+            document.getElementById('exportWest').textContent  = f(exportBounds.west);
+        }
+
+        function _makeHandle(type, lat, lng) {
+            const sizes = { corner: [12, 12], edge: [10, 10], center: [18, 18] };
+            const [w, h] = sizes[type];
+            return L.marker([lat, lng], {
+                draggable: true,
+                icon: L.divIcon({
+                    className: '',
+                    html: `<span class="export-handle-${type}"></span>`,
+                    iconSize: [w, h],
+                    iconAnchor: [w / 2, h / 2],
+                }),
+                keyboard: false,
+                zIndexOffset: 3000,
+            });
+        }
+
+        function _refreshBboxRect() {
+            if (!exportBboxGroup) return;
+            exportBboxGroup.eachLayer(l => {
+                if (l instanceof L.Rectangle) {
+                    l.setBounds([[exportBounds.south, exportBounds.west],
+                                 [exportBounds.north, exportBounds.east]]);
+                }
+            });
+        }
+
+        function drawExportBoundingBox() {
+            clearExportBoundingBox();
+            exportBboxGroup = L.layerGroup().addTo(map);
+
+            const { north, south, east, west } = exportBounds;
+            const midLat = (north + south) / 2;
+            const midLng = (east + west)  / 2;
+
+            // Rectangle fill
+            exportBboxGroup.addLayer(L.rectangle(
+                [[south, west], [north, east]],
+                { color: '#7c3aed', weight: 2, fillColor: '#8b5cf6', fillOpacity: 0.08 }
+            ));
+
+            // Corner handles  (drag changes two bounds simultaneously)
+            const corners = [
+                { lat: north, lng: west,  onDrag: ll => { exportBounds.north = ll.lat; exportBounds.west = ll.lng; } },
+                { lat: north, lng: east,  onDrag: ll => { exportBounds.north = ll.lat; exportBounds.east = ll.lng; } },
+                { lat: south, lng: east,  onDrag: ll => { exportBounds.south = ll.lat; exportBounds.east = ll.lng; } },
+                { lat: south, lng: west,  onDrag: ll => { exportBounds.south = ll.lat; exportBounds.west = ll.lng; } },
+            ];
+            corners.forEach(({ lat, lng, onDrag }) => {
+                const h = _makeHandle('corner', lat, lng);
+                h.on('drag', e => { onDrag(e.target.getLatLng()); _refreshBboxRect(); _updateExportBoundsDisplay(); });
+                h.on('dragend', () => drawExportBoundingBox());
+                h.on('click', e => e.originalEvent && L.DomEvent.stop(e.originalEvent));
+                exportBboxGroup.addLayer(h);
+            });
+
+            // Edge midpoint handles  (drag changes one bound)
+            const edges = [
+                { lat: north,  lng: midLng, onDrag: ll => { exportBounds.north = ll.lat; } },
+                { lat: south,  lng: midLng, onDrag: ll => { exportBounds.south = ll.lat; } },
+                { lat: midLat, lng: east,   onDrag: ll => { exportBounds.east  = ll.lng; } },
+                { lat: midLat, lng: west,   onDrag: ll => { exportBounds.west  = ll.lng; } },
+            ];
+            edges.forEach(({ lat, lng, onDrag }) => {
+                const h = _makeHandle('edge', lat, lng);
+                h.on('drag', e => { onDrag(e.target.getLatLng()); _refreshBboxRect(); _updateExportBoundsDisplay(); });
+                h.on('dragend', () => drawExportBoundingBox());
+                h.on('click', e => e.originalEvent && L.DomEvent.stop(e.originalEvent));
+                exportBboxGroup.addLayer(h);
+            });
+
+            // Center move handle
+            let _startBounds = null, _startLL = null;
+            const center = _makeHandle('center', midLat, midLng);
+            center.on('dragstart', e => {
+                _startBounds = { ...exportBounds };
+                _startLL = e.target.getLatLng();
+            });
+            center.on('drag', e => {
+                if (!_startBounds) return;
+                const ll = e.target.getLatLng();
+                const dLat = ll.lat - _startLL.lat;
+                const dLng = ll.lng - _startLL.lng;
+                exportBounds.north = _startBounds.north + dLat;
+                exportBounds.south = _startBounds.south + dLat;
+                exportBounds.east  = _startBounds.east  + dLng;
+                exportBounds.west  = _startBounds.west  + dLng;
+                _refreshBboxRect();
+                _updateExportBoundsDisplay();
+            });
+            center.on('dragend', () => { _startBounds = null; _startLL = null; drawExportBoundingBox(); });
+            center.on('click', e => e.originalEvent && L.DomEvent.stop(e.originalEvent));
+            exportBboxGroup.addLayer(center);
+        }
+
+        function clearExportBoundingBox() {
+            if (exportBboxGroup) { map.removeLayer(exportBboxGroup); exportBboxGroup = null; }
+        }
+
+        // ── Enter / exit export mode ─────────────────────────────────────────
+
+        function enterExportMode() {
+            if (isExportMode) return;
+            isExportMode   = true;
+            exportBounds   = _computeInitialExportBounds();
+
+            ['mainSidebarHeader', 'pointContainer', 'mainSidebarFooter'].forEach(id =>
+                document.getElementById(id).classList.add('hidden'));
+            const ep = document.getElementById('exportModePanel');
+            ep.classList.remove('hidden');
+            ep.style.display = 'flex';
+
+            drawExportBoundingBox();
+            _updateExportBoundsDisplay();
+            _syncExportStyleButtons();
+            _syncExportResButtons();
+
+            map.fitBounds(
+                [[exportBounds.south, exportBounds.west], [exportBounds.north, exportBounds.east]],
+                { padding: [60, 60] }
+            );
+        }
+
+        function exitExportMode() {
+            if (!isExportMode) return;
+            isExportMode = false;
+            clearExportBoundingBox();
+
+            ['mainSidebarHeader', 'pointContainer', 'mainSidebarFooter'].forEach(id =>
+                document.getElementById(id).classList.remove('hidden'));
+            const ep = document.getElementById('exportModePanel');
+            ep.classList.add('hidden');
+            ep.style.display = '';
+
+            // Reset preview
+            const img = document.getElementById('exportPreviewImg');
+            img.src = '';
+            img.classList.add('hidden');
+            document.getElementById('exportPreviewPlaceholder').classList.remove('hidden');
+            document.getElementById('exportStatusMsg').classList.add('hidden');
+        }
+
+        // ── UI helpers ───────────────────────────────────────────────────────
+
+        function _syncExportStyleButtons() {
+            document.querySelectorAll('.export-style-btn').forEach(btn => {
+                const active = btn.dataset.style === exportMapStyle;
+                btn.className = `export-style-btn py-2 text-xs font-semibold rounded-lg border transition ${active ? 'export-style-btn-active' : 'export-style-btn-default'}`;
+            });
+        }
+
+        function _syncExportResButtons() {
+            document.querySelectorAll('.export-res-btn').forEach(btn => {
+                const active = parseInt(btn.dataset.w) === exportWidth && parseInt(btn.dataset.h) === exportHeight;
+                btn.className = `export-res-btn py-2 text-xs font-semibold rounded-lg border transition ${active ? 'export-res-btn-active' : 'export-res-btn-default'}`;
+            });
+        }
+
+        // ── Run export (preview or full-res) ─────────────────────────────────
+
+        async function runExport(isPreview) {
+            const statusEl  = document.getElementById('exportStatusMsg');
+            const activeBtn = document.getElementById(isPreview ? 'btnPreview' : 'btnDownloadExport');
+            const origText  = activeBtn.textContent;
+
+            activeBtn.disabled = true;
+            activeBtn.textContent = isPreview ? 'Rendering…' : 'Generating…';
+            statusEl.textContent = isPreview ? 'Rendering preview…' : `Rendering ${exportWidth}×${exportHeight} image…`;
+            statusEl.classList.remove('hidden');
+
+            // Build route geometry
+            let routeGeo = [];
+            if (drivingPathGeometry.length >= 2) {
+                routeGeo = drivingPathGeometry.map(p => ({ lat: p.lat, lng: p.lng }));
+            } else if (optimizedRoute.length >= 2) {
+                routeGeo = optimizedRoute.map(p => ({ lat: p.lat, lng: p.lng }));
+            }
+
+            // Build waypoints list (use optimized order if available)
+            const srcPts = optimizedRoute.length ? getVisibleRoutePoints(optimizedRoute) : points;
+            const waypointsList = srcPts.map((p, i) => ({
+                lat: p.lat, lng: p.lng,
+                routeKey: p.routeKey || '',
+                id: p.id || '',
+                rank: i + 1,
+            }));
+
+            const payload = {
+                bounds:           exportBounds,
+                width:            isPreview ? 512 : exportWidth,
+                height:           isPreview ? 512 : exportHeight,
+                format:           isPreview ? 'png' : exportFormat,
+                map_style:        exportMapStyle,
+                show_route:       exportShowRoute,
+                route_color:      exportRouteColor,
+                route_thickness:  exportRouteThickness,
+                route_opacity:    exportRouteOpacity / 100,
+                route_dashed:     exportRouteDashed,
+                route_geometry:   routeGeo,
+                show_points:      exportPointVis !== 'none',
+                show_point_labels:exportShowLabels,
+                point_color:      exportPointColor,
+                point_size:       exportPointSize,
+                point_visibility: exportPointVis,
+                waypoints:        waypointsList,
+            };
+
+            try {
+                const resp = await fetch('/api/export-map', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail || 'Export failed.');
+                }
+                const blob = await resp.blob();
+
+                if (isPreview) {
+                    const url = URL.createObjectURL(blob);
+                    const img = document.getElementById('exportPreviewImg');
+                    img.onload = () => URL.revokeObjectURL(url);
+                    img.src    = url;
+                    img.classList.remove('hidden');
+                    document.getElementById('exportPreviewPlaceholder').classList.add('hidden');
+                    statusEl.textContent = 'Preview ready.';
+                } else {
+                    const ext  = exportFormat === 'jpeg' ? 'jpg' : 'png';
+                    const ts   = new Date().toISOString().replace(/[:.]/g, '-');
+                    const url  = URL.createObjectURL(blob);
+                    const a    = document.createElement('a');
+                    a.href     = url;
+                    a.download = `map-export-${ts}.${ext}`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    statusEl.textContent = 'Download started!';
+                }
+            } catch (err) {
+                statusEl.textContent = err.message || 'Export failed.';
+                alert(err.message || 'Export failed.');
+            } finally {
+                activeBtn.disabled  = false;
+                activeBtn.textContent = origText;
+            }
+        }
+
+        // ── Export event listeners ───────────────────────────────────────────
+
+        document.getElementById('btnExportMap').addEventListener('click', enterExportMode);
+        document.getElementById('btnExitExport').addEventListener('click', exitExportMode);
+        document.getElementById('btnPreview').addEventListener('click', () => runExport(true));
+        document.getElementById('btnDownloadExport').addEventListener('click', () => runExport(false));
+
+        document.querySelectorAll('.export-style-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                exportMapStyle = btn.dataset.style;
+                _syncExportStyleButtons();
+            });
+        });
+
+        document.querySelectorAll('.export-res-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                exportWidth  = parseInt(btn.dataset.w);
+                exportHeight = parseInt(btn.dataset.h);
+                document.getElementById('exportWidth').value  = exportWidth;
+                document.getElementById('exportHeight').value = exportHeight;
+                _syncExportResButtons();
+            });
+        });
+
+        document.getElementById('exportWidth').addEventListener('input', e => {
+            exportWidth = Math.max(256, Math.min(8192, parseInt(e.target.value) || 2048));
+            _syncExportResButtons();
+        });
+        document.getElementById('exportHeight').addEventListener('input', e => {
+            exportHeight = Math.max(256, Math.min(8192, parseInt(e.target.value) || 2048));
+            _syncExportResButtons();
+        });
+
+        document.getElementById('exportShowRoute').addEventListener('change', e => {
+            exportShowRoute = e.target.checked;
+            document.getElementById('exportRouteControls').style.opacity = exportShowRoute ? '1' : '0.35';
+        });
+        document.getElementById('exportRouteColor').addEventListener('input', e => { exportRouteColor = e.target.value; });
+        document.getElementById('exportRouteThickness').addEventListener('input', e => {
+            exportRouteThickness = parseInt(e.target.value);
+            document.getElementById('exportRouteThicknessVal').textContent = exportRouteThickness;
+        });
+        document.getElementById('exportRouteOpacity').addEventListener('input', e => {
+            exportRouteOpacity = parseInt(e.target.value);
+            document.getElementById('exportRouteOpacityVal').textContent = exportRouteOpacity;
+        });
+        document.getElementById('exportRouteDashed').addEventListener('change', e => { exportRouteDashed = e.target.checked; });
+
+        document.getElementById('exportPointVisibility').addEventListener('change', e => {
+            exportPointVis = e.target.value;
+            document.getElementById('exportPointControls').style.opacity = exportPointVis === 'none' ? '0.35' : '1';
+        });
+        document.getElementById('exportPointColor').addEventListener('input', e => { exportPointColor = e.target.value; });
+        document.getElementById('exportPointSize').addEventListener('input', e => {
+            exportPointSize = parseInt(e.target.value);
+            document.getElementById('exportPointSizeVal').textContent = exportPointSize;
+        });
+        document.getElementById('exportShowLabels').addEventListener('change', e => { exportShowLabels = e.target.checked; });
+        document.getElementById('exportFormat').addEventListener('change', e => { exportFormat = e.target.value; });
+
+        // Initialise button states (called once after DOM ready)
+        _syncExportStyleButtons();
+        _syncExportResButtons();
     </script>
 </body>
 </html>
