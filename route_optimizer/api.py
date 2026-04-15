@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import io
 import math
+from functools import lru_cache
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -56,6 +57,21 @@ class MapTileFetchError(RuntimeError):
     """Raised when the export renderer cannot fetch a required map tile."""
 
 
+@lru_cache(maxsize=64)
+def _load_font(size: int, *, bold: bool = False):
+    font_names = [
+        "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
+        "Arial Bold.ttf" if bold else "Arial.ttf",
+        "arialbd.ttf" if bold else "arial.ttf",
+    ]
+    for font_name in font_names:
+        try:
+            return ImageFont.truetype(font_name, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
 def _tile_y_f(lat: float, zoom: int) -> float:
     lr = math.radians(lat)
     return (1.0 - math.log(math.tan(lr) + 1.0 / math.cos(lr)) / math.pi) / 2.0 * (2 ** zoom)
@@ -82,16 +98,27 @@ def _tile_url(style: str, x: int, y: int, z: int, idx: int) -> str:
     return tpl.format(s=sub, z=z, x=x, y=y)
 
 
-def _fetch_tile(args: tuple) -> tuple:
+@lru_cache(maxsize=1024)
+def _fetch_tile_bytes(style: str, x: int, y: int, z: int) -> bytes:
     import requests as _req  # local import keeps module load fast
-    style, x, y, z, idx = args
-    url = _tile_url(style, x, y, z, idx)
+
+    url = _tile_url(style, x, y, z, (x + y + z) % 4)
     try:
-        r = _req.get(url, timeout=15, headers={"User-Agent": "RouteOptimizerApp/1.0"})
-        r.raise_for_status()
-        return x, y, Image.open(io.BytesIO(r.content)).convert("RGBA")
+        response = _req.get(url, timeout=15, headers={"User-Agent": "RouteOptimizerApp/1.0"})
+        response.raise_for_status()
     except Exception as exc:
         raise MapTileFetchError(f"Failed to fetch map tile {z}/{x}/{y} from {url}.") from exc
+    return response.content
+
+
+def _fetch_tile(args: tuple) -> tuple:
+    style, x, y, z, idx = args
+    try:
+        return x, y, Image.open(io.BytesIO(_fetch_tile_bytes(style, x, y, z))).convert("RGBA")
+    except Exception as exc:
+        if isinstance(exc, MapTileFetchError):
+            raise
+        raise MapTileFetchError(f"Failed to decode map tile {z}/{x}/{y}.") from exc
 
 
 def _hex_rgba(hex_color: str, alpha: float = 1.0) -> tuple:
@@ -100,6 +127,25 @@ def _hex_rgba(hex_color: str, alpha: float = 1.0) -> tuple:
         h = "".join(c * 2 for c in h)
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return r, g, b, int(max(0.0, min(1.0, alpha)) * 255)
+
+
+def _merge_route_segments(route_segments) -> list:
+    merged = []
+    for segment in route_segments:
+        geometry = (
+            segment.get("geometry", [])
+            if isinstance(segment, dict)
+            else getattr(segment, "geometry", [])
+        ) or []
+        for point_index, point in enumerate(geometry):
+            lat = float(point["lat"] if isinstance(point, dict) else point.lat)
+            lng = float(point["lng"] if isinstance(point, dict) else point.lng)
+            if merged and point_index == 0:
+                last_point = merged[-1]
+                if abs(last_point["lat"] - lat) < 1e-9 and abs(last_point["lng"] - lng) < 1e-9:
+                    continue
+            merged.append({"lat": lat, "lng": lng})
+    return merged
 
 
 def _dashed_line(
@@ -126,8 +172,27 @@ def _dashed_line(
                     [(x0 + nx * d, y0 + ny * d), (x0 + nx * end, y0 + ny * end)],
                     fill=fill,
                     width=width,
+                    joint="curve",
                 )
             d, on = end, not on
+
+
+def _draw_polyline(
+    draw: ImageDraw.ImageDraw,
+    pts: list[tuple],
+    fill: tuple,
+    width: int,
+    *,
+    round_caps: bool = False,
+) -> None:
+    if len(pts) < 2:
+        return
+    draw.line(pts, fill=fill, width=width, joint="curve")
+
+    if round_caps:
+        radius = max(1, width // 2)
+        for x, y in (pts[0], pts[-1]):
+            draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
 
 
 def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
@@ -186,6 +251,151 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
     def _e(lat: float, lng: float) -> tuple[float, float]:
         px, py = _c(lat, lng)
         return (px - cx0) * sx, (py - cy0) * sy
+
+    scale_f = tw / 2048.0
+    overlay_scale = 2 if max(tw, th) <= 4096 and (tw * th) <= 17_000_000 else 1
+    overlay = Image.new("RGBA", (tw * overlay_scale, th * overlay_scale), (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+
+    def _oe(lat: float, lng: float) -> tuple[float, float]:
+        px, py = _e(lat, lng)
+        return px * overlay_scale, py * overlay_scale
+
+    route_segments = list(req.route_segments)
+    if not route_segments and req.route_geometry:
+        route_segments = [{"color": req.route_color, "geometry": req.route_geometry}]
+
+    if req.show_route and route_segments:
+        merged_geometry = _merge_route_segments(route_segments)
+        merged_pts = [_oe(point["lat"], point["lng"]) for point in merged_geometry]
+        thick = max(1, round(req.route_thickness * scale_f * overlay_scale))
+        casing_thick = thick + max(2 * overlay_scale, thick // 2)
+        casing_rgba = (255, 255, 255, int(req.route_opacity * 210))
+
+        if len(merged_pts) >= 2:
+            if req.route_dashed and req.route_style == "solid":
+                dash_len = max(10 * overlay_scale, round(20 * scale_f * overlay_scale))
+                gap_len = max(6 * overlay_scale, round(12 * scale_f * overlay_scale))
+                _dashed_line(overlay_draw, merged_pts, casing_rgba, casing_thick, dash_len, gap_len)
+            else:
+                _draw_polyline(
+                    overlay_draw,
+                    merged_pts,
+                    casing_rgba,
+                    casing_thick,
+                    round_caps=True,
+                )
+
+        first_segment_pts = None
+        last_segment_pts = None
+        first_segment_rgba = None
+        last_segment_rgba = None
+        for segment in route_segments:
+            segment_geometry = segment.get("geometry") if isinstance(segment, dict) else getattr(segment, "geometry", None)
+            segment_color = segment.get("color", req.route_color) if isinstance(segment, dict) else getattr(segment, "color", req.route_color)
+            if not segment_geometry:
+                continue
+
+            pts = [
+                _oe(
+                    point["lat"] if isinstance(point, dict) else point.lat,
+                    point["lng"] if isinstance(point, dict) else point.lng,
+                )
+                for point in segment_geometry
+            ]
+            if len(pts) < 2:
+                continue
+
+            route_rgba = _hex_rgba(segment_color, req.route_opacity)
+            if first_segment_pts is None:
+                first_segment_pts = pts
+                first_segment_rgba = route_rgba
+            last_segment_pts = pts
+            last_segment_rgba = route_rgba
+            if req.route_dashed and req.route_style == "solid":
+                dash_len = max(10 * overlay_scale, round(20 * scale_f * overlay_scale))
+                gap_len = max(6 * overlay_scale, round(12 * scale_f * overlay_scale))
+                _dashed_line(overlay_draw, pts, route_rgba, thick, dash_len, gap_len)
+            else:
+                _draw_polyline(overlay_draw, pts, route_rgba, thick)
+
+        if not (req.route_dashed and req.route_style == "solid"):
+            radius = max(1, thick // 2)
+            if first_segment_pts and first_segment_rgba:
+                x, y = first_segment_pts[0]
+                overlay_draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=first_segment_rgba)
+            if last_segment_pts and last_segment_rgba:
+                x, y = last_segment_pts[-1]
+                overlay_draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=last_segment_rgba)
+
+    if req.show_points and req.point_visibility != "none" and req.waypoints:
+        wps = req.waypoints
+        if req.point_visibility == "start_end" and len(wps) > 2:
+            wps = [wps[0], wps[-1]]
+
+        marker_r = max(3 * overlay_scale, round(req.point_size * scale_f * 0.55 * overlay_scale))
+        point_rgba = _hex_rgba(req.point_color)
+        start_rgba = (22, 163, 74, 230)
+        font_size = max(10 * overlay_scale, min(32 * overlay_scale, round(13 * scale_f * overlay_scale)))
+        font = _load_font(font_size, bold=True)
+
+        for i, wp in enumerate(wps):
+            px, py = _oe(wp.lat, wp.lng)
+            if px < -marker_r * 3 or px > (tw * overlay_scale) + marker_r * 3 or py < -marker_r * 3 or py > (th * overlay_scale) + marker_r * 3:
+                continue
+
+            fill = start_rgba if i == 0 else point_rgba
+
+            if req.point_shape == "pin":
+                pin_r = max(4 * overlay_scale, round(req.point_size * scale_f * 0.7 * overlay_scale))
+                tail_h = max(4 * overlay_scale, round(pin_r * 1.4))
+                cx, cy = int(px), int(py - tail_h)
+
+                overlay_draw.ellipse(
+                    [(cx - pin_r - (2 * overlay_scale), cy - pin_r - (2 * overlay_scale)),
+                     (cx + pin_r + (2 * overlay_scale), cy + pin_r + (2 * overlay_scale))],
+                    fill=(255, 255, 255, 235),
+                )
+                overlay_draw.ellipse([(cx - pin_r, cy - pin_r), (cx + pin_r, cy + pin_r)], fill=fill)
+                overlay_draw.polygon(
+                    [(cx - pin_r // 2, cy + pin_r // 2), (cx + pin_r // 2, cy + pin_r // 2), (int(px), int(py))],
+                    fill=fill,
+                )
+                ir = max(1 * overlay_scale, pin_r // 3)
+                overlay_draw.ellipse([(cx - ir, cy - ir), (cx + ir, cy + ir)], fill=(255, 255, 255, 210))
+                label_ox, label_oy = cx + pin_r + (5 * overlay_scale), cy - pin_r
+            else:
+                overlay_draw.ellipse(
+                    [(px - marker_r - (2 * overlay_scale), py - marker_r - (2 * overlay_scale)),
+                     (px + marker_r + (2 * overlay_scale), py + marker_r + (2 * overlay_scale))],
+                    fill=(255, 255, 255, 235),
+                )
+                overlay_draw.ellipse([(px - marker_r, py - marker_r), (px + marker_r, py + marker_r)], fill=fill)
+                ir = max(1 * overlay_scale, marker_r // 3)
+                overlay_draw.ellipse([(px - ir, py - ir), (px + ir, py + ir)], fill=(255, 255, 255, 220))
+                label_ox, label_oy = int(px + marker_r + (5 * overlay_scale)), int(py - marker_r)
+
+            if req.show_point_labels and wp.id:
+                label = wp.id if len(wp.id) <= 28 else wp.id[:26] + "…"
+                try:
+                    bbox = overlay_draw.textbbox((label_ox, label_oy), label, font=font)
+                    pad = 3 * overlay_scale
+                    overlay_draw.rounded_rectangle(
+                        [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad],
+                        radius=max(4, 5 * overlay_scale),
+                        fill=(255, 255, 255, 215),
+                    )
+                except AttributeError:
+                    pass
+                shadow_offset = max(1, overlay_scale)
+                overlay_draw.text((label_ox + shadow_offset, label_oy + shadow_offset), label, font=font, fill=(0, 0, 0, 90))
+                overlay_draw.text((label_ox, label_oy), label, font=font, fill=(20, 20, 20, 235))
+
+    if overlay_scale > 1:
+        overlay = overlay.resize((tw, th), Image.LANCZOS)
+
+    canvas.alpha_composite(overlay)
+    req = req.model_copy(update={"show_route": False, "show_points": False})
 
     draw = ImageDraw.Draw(canvas)
     scale_f = tw / 2048.0

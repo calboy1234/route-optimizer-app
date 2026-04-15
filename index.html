@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; connect-src 'self' https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; font-src 'self' data:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://unpkg.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; connect-src 'self' https://*.tile.openstreetmap.org https://*.basemaps.cartocdn.com https://server.arcgisonline.com; font-src 'self' data:;">
     <title>Route Optimizer App</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -312,15 +312,28 @@
                 <!-- Route -->
                 <div class="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
                     <div class="flex items-center justify-between">
-                        <p class="text-[9px] font-bold uppercase tracking-wide text-slate-400">Route Line</p>
+                        <p class="text-[9px] font-bold uppercase tracking-wide text-slate-400">Route Track</p>
                         <label class="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer select-none">
                             <input id="exportShowRoute" type="checkbox" checked class="rounded border-slate-300 text-violet-600 w-3 h-3"> Visible
                         </label>
                     </div>
+                    <div class="space-y-2">
+                        <div>
+                            <p class="text-[9px] text-slate-400 mb-1">Style</p>
+                            <div class="flex gap-1.5">
+                                <button class="export-route-style-btn flex-1 py-1.5 text-[11px] font-semibold rounded-lg border transition" data-route-style="solid">Solid</button>
+                                <button class="export-route-style-btn flex-1 py-1.5 text-[11px] font-semibold rounded-lg border transition" data-route-style="gradient">Gradient</button>
+                            </div>
+                        </div>
+                    </div>
                     <div id="exportRouteControls" class="grid grid-cols-2 gap-2">
                         <div>
-                            <p class="text-[9px] text-slate-400 mb-1">Color</p>
+                            <p id="exportRoutePrimaryColorLabel" class="text-[9px] text-slate-400 mb-1">Color</p>
                             <input id="exportRouteColor" type="color" value="#2563eb" class="w-full h-7 rounded border border-slate-200 cursor-pointer">
+                        </div>
+                        <div id="exportRouteGradientEndWrap">
+                            <p class="text-[9px] text-slate-400 mb-1">End color</p>
+                            <input id="exportRouteGradientEnd" type="color" value="#2563eb" class="w-full h-7 rounded border border-slate-200 cursor-pointer">
                         </div>
                         <div>
                             <p class="text-[9px] text-slate-400 mb-1">Thickness: <span id="exportRouteThicknessVal">4</span>px</p>
@@ -330,10 +343,11 @@
                             <p class="text-[9px] text-slate-400 mb-1">Opacity: <span id="exportRouteOpacityVal">85</span>%</p>
                             <input id="exportRouteOpacity" type="range" min="10" max="100" value="85" class="w-full accent-violet-600">
                         </div>
-                        <div class="flex items-center gap-2 pt-3">
+                        <div id="exportRouteDashWrap" class="flex items-center gap-2 pt-3">
                             <input id="exportRouteDashed" type="checkbox" class="rounded border-slate-300 text-violet-600 w-3 h-3">
                             <label for="exportRouteDashed" class="text-[11px] text-slate-600 cursor-pointer">Dashed</label>
                         </div>
+                        <p id="exportRouteGradientHint" class="col-span-2 text-[9px] text-slate-400 leading-tight hidden">Gradient colors follow the visit order and use the exact same render for preview and download.</p>
                     </div>
                 </div>
 
@@ -558,6 +572,9 @@
         });
 
         satelliteLayer.addTo(map);
+        map.createPane('exportPreviewPane');
+        map.getPane('exportPreviewPane').style.zIndex = 350;
+        map.getPane('exportPreviewPane').style.pointerEvents = 'none';
         L.control.layers(
             {
                 Streets: streetLayer,
@@ -1243,37 +1260,60 @@
             document.getElementById('snapWarningDetails').open = false;
         }
 
-        function interpolateRgbColor(start, end, progress) {
+        function hexToRgb(hex) {
+            const normalized = String(hex || '').trim().replace('#', '');
+            const full = normalized.length === 3
+                ? normalized.split('').map((ch) => ch + ch).join('')
+                : normalized;
+
+            if (!/^[0-9a-fA-F]{6}$/.test(full)) {
+                return [37, 99, 235];
+            }
+
+            return [
+                parseInt(full.slice(0, 2), 16),
+                parseInt(full.slice(2, 4), 16),
+                parseInt(full.slice(4, 6), 16),
+            ];
+        }
+
+        function rgbToHex(rgb) {
+            return `#${rgb.map((value) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0')).join('')}`;
+        }
+
+        function interpolateRgbColor(start, end, progress, alpha = 0.78) {
             const red = Math.round(start[0] + ((end[0] - start[0]) * progress));
             const green = Math.round(start[1] + ((end[1] - start[1]) * progress));
             const blue = Math.round(start[2] + ((end[2] - start[2]) * progress));
-            return `rgba(${red}, ${green}, ${blue}, 0.78)`;
+            return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
         }
 
-        function getDrivingPathSegmentColors(segmentCount) {
-            const gradientStart = [16, 185, 129];
-            const gradientEnd = [37, 99, 235];
+        function interpolateHexColor(start, end, progress) {
+            return rgbToHex([
+                start[0] + ((end[0] - start[0]) * progress),
+                start[1] + ((end[1] - start[1]) * progress),
+                start[2] + ((end[2] - start[2]) * progress),
+            ]);
+        }
+
+        function getDrivingPathSegmentColors(segmentCount, startHex = '#10b981', endHex = '#2563eb', alpha = 0.78) {
+            const gradientStart = hexToRgb(startHex);
+            const gradientEnd = hexToRgb(endHex);
             const safeSegmentCount = Math.max(segmentCount, 1);
             return Array.from({ length: safeSegmentCount }, (_, index) => {
                 const progress = safeSegmentCount === 1 ? 0 : index / (safeSegmentCount - 1);
-                return interpolateRgbColor(gradientStart, gradientEnd, progress);
+                return interpolateRgbColor(gradientStart, gradientEnd, progress, alpha);
             });
         }
 
-        function findClosestGeometryIndex(latLng, geometry, startIndex = 0) {
-            let closestIndex = Math.min(Math.max(startIndex, 0), geometry.length - 1);
-            let closestDistance = Number.POSITIVE_INFINITY;
-
-            for (let index = Math.max(startIndex, 0); index < geometry.length; index += 1) {
-                const geometryPoint = geometry[index];
-                const distance = getDistanceMeters(latLng[0], latLng[1], geometryPoint.lat, geometryPoint.lng);
-                if (distance < closestDistance) {
-                    closestDistance = distance;
-                    closestIndex = index;
-                }
-            }
-
-            return closestIndex;
+        function getHexGradientColors(segmentCount, startHex, endHex) {
+            const gradientStart = hexToRgb(startHex);
+            const gradientEnd = hexToRgb(endHex);
+            const safeSegmentCount = Math.max(segmentCount, 1);
+            return Array.from({ length: safeSegmentCount }, (_, index) => {
+                const progress = safeSegmentCount === 1 ? 0 : index / (safeSegmentCount - 1);
+                return interpolateHexColor(gradientStart, gradientEnd, progress);
+            });
         }
 
         function mergeDrivingLegLatLngs(legs) {
@@ -1302,7 +1342,7 @@
             return merged;
         }
 
-        function buildDrivingPathColorSegmentsFromLegs(routePoints) {
+        function buildRouteLegGroups(routePoints) {
             if (!drivingPathLegGeometry.length || routePoints.length < 2) {
                 return [];
             }
@@ -1310,12 +1350,7 @@
             const visibleRoutePoints = getVisibleRoutePoints(routePoints);
             if (visibleRoutePoints.length < 2) {
                 const mergedLatLngs = mergeDrivingLegLatLngs(drivingPathLegGeometry);
-                return mergedLatLngs.length >= 2
-                    ? [{
-                        latLngs: mergedLatLngs,
-                        color: getDrivingPathSegmentColors(1)[0]
-                    }]
-                    : [];
+                return mergedLatLngs.length >= 2 ? [mergedLatLngs] : [];
             }
 
             const segmentLegGroups = [];
@@ -1341,11 +1376,40 @@
                 }
             }
 
-            const segmentColors = getDrivingPathSegmentColors(Math.max(segmentLegGroups.length, 1));
-            return segmentLegGroups.map((legGroup, index) => ({
-                latLngs: mergeDrivingLegLatLngs(legGroup),
+            return segmentLegGroups
+                .map((legGroup) => mergeDrivingLegLatLngs(legGroup))
+                .filter((latLngs) => latLngs.length >= 2);
+        }
+
+        function buildDrivingPathColorSegmentsFromLegs(routePoints) {
+            const legGroups = buildRouteLegGroups(routePoints);
+            if (!legGroups.length) {
+                return [];
+            }
+
+            const segmentColors = getDrivingPathSegmentColors(Math.max(legGroups.length, 1));
+            return legGroups.map((latLngs, index) => ({
+                latLngs,
                 color: segmentColors[index]
-            })).filter((segment) => segment.latLngs.length >= 2);
+            }));
+        }
+
+        function buildExportRouteSegments(routePoints) {
+            const legGroups = buildRouteLegGroups(routePoints);
+            if (!legGroups.length) {
+                return [];
+            }
+
+            const segmentColors = getHexGradientColors(
+                Math.max(legGroups.length, 1),
+                exportRouteColor,
+                exportRouteGradientEnd
+            );
+
+            return legGroups.map((latLngs, index) => ({
+                color: segmentColors[index],
+                geometry: latLngs.map(([lat, lng]) => ({ lat, lng }))
+            }));
         }
 
         function buildDrivingPathColorSegments(routePoints) {
@@ -1358,35 +1422,10 @@
                 return legBasedSegments;
             }
 
-            const visibleRoutePoints = getVisibleRoutePoints(routePoints);
-            if (visibleRoutePoints.length < 2) {
-                return [{
-                    latLngs: drivingPathGeometry.map((point) => [point.lat, point.lng]),
-                    color: getDrivingPathSegmentColors(1)[0]
-                }];
-            }
-
-            const anchorIndices = [];
-            let searchStartIndex = 0;
-            visibleRoutePoints.forEach((point) => {
-                const anchorLatLng = getPointLatLng(point, { preferSnapped: true });
-                const anchorIndex = findClosestGeometryIndex(anchorLatLng, drivingPathGeometry, searchStartIndex);
-                anchorIndices.push(anchorIndex);
-                searchStartIndex = anchorIndex;
-            });
-
-            const segmentColors = getDrivingPathSegmentColors(visibleRoutePoints.length - 1);
-            return segmentColors.map((color, index) => {
-                const isLastSegment = index === segmentColors.length - 1;
-                const startIndex = index === 0 ? 0 : anchorIndices[index];
-                const endIndex = isLastSegment ? drivingPathGeometry.length - 1 : anchorIndices[index + 1];
-                const normalizedEndIndex = Math.max(startIndex + 1, endIndex);
-                const latLngs = drivingPathGeometry
-                    .slice(startIndex, normalizedEndIndex + 1)
-                    .map((point) => [point.lat, point.lng]);
-
-                return { latLngs, color };
-            }).filter((segment) => segment.latLngs.length >= 2);
+            return [{
+                latLngs: drivingPathGeometry.map((point) => [point.lat, point.lng]),
+                color: getDrivingPathSegmentColors(1)[0]
+            }];
         }
 
         function drawOptimizedRoute(routePoints) {
@@ -1437,18 +1476,8 @@
                 }
             ).addTo(map);
 
-            drivingPathLine = L.polyline(
-                pathLatLngs,
-                {
-                    color: 'rgba(16, 185, 129, 0.18)',
-                    weight: 5,
-                    opacity: 1,
-                    lineCap: 'round',
-                    lineJoin: 'round'
-                }
-            ).addTo(map);
-
-            buildDrivingPathColorSegments(routePoints).forEach(({ latLngs, color }) => {
+            const pathSegments = buildDrivingPathColorSegments(routePoints);
+            pathSegments.forEach(({ latLngs, color }) => {
                 const segment = L.polyline(
                     latLngs,
                     {
@@ -2234,7 +2263,9 @@
         let exportMaxDim         = 2048;     // max dimension; other dim computed from bbox ratio
         let exportFormat         = 'png';
         let exportShowRoute      = true;
+        let exportRouteStyle     = 'solid';
         let exportRouteColor     = '#2563eb';
+        let exportRouteGradientEnd = '#2563eb';
         let exportRouteThickness = 4;
         let exportRouteOpacity   = 85;       // 0–100 in UI
         let exportRouteDashed    = false;
@@ -2244,8 +2275,11 @@
         let exportPointShape     = 'circle';   // 'circle' | 'pin' | future shapes
         let exportShowLabels     = true;
         let _tileLayerBeforeExport = null;
-        let _exportRouteLine     = null;
-        let _exportMarkers       = [];
+        let _exportPreviewOverlay = null;
+        let _exportPreviewUrl    = null;
+        let _exportPreviewAbort  = null;
+        let _exportPreviewTimer  = null;
+        let _exportPreviewSeq    = 0;
         let _exportInteractionState = null;
         const EXPORT_LAT_LIMIT = 85;
         const EXPORT_LNG_LIMIT = 180;
@@ -2400,13 +2434,152 @@
 
         // ── Live export overlays — drawn on map in export mode ────────────────
         function _clearExportOverlays() {
-            if (_exportRouteLine) { map.removeLayer(_exportRouteLine); _exportRouteLine = null; }
-            _exportMarkers.forEach(m => map.removeLayer(m));
-            _exportMarkers = [];
+            if (_exportPreviewTimer) {
+                clearTimeout(_exportPreviewTimer);
+                _exportPreviewTimer = null;
+            }
+            if (_exportPreviewAbort) {
+                _exportPreviewAbort.abort();
+                _exportPreviewAbort = null;
+            }
+            if (_exportPreviewOverlay) {
+                map.removeLayer(_exportPreviewOverlay);
+                _exportPreviewOverlay = null;
+            }
+            if (_exportPreviewUrl) {
+                URL.revokeObjectURL(_exportPreviewUrl);
+                _exportPreviewUrl = null;
+            }
+        }
+
+        function _computePreviewDims() {
+            return _computeExportDims(exportBounds, exportMaxDim);
+        }
+
+        function _buildExportPayload(options = {}) {
+            const { preview = false } = options;
+            const dims = preview ? _computePreviewDims() : _computeExportDims(exportBounds, exportMaxDim);
+
+            const routeGeo = drivingPathGeometry.length >= 2
+                ? drivingPathGeometry.map((point) => ({ lat: point.lat, lng: point.lng }))
+                : optimizedRoute.length >= 2
+                    ? optimizedRoute.map((point) => ({ lat: point.lat, lng: point.lng }))
+                    : [];
+
+            const routeSource = optimizedRoute.length ? optimizedRoute : points;
+            let routeSegments = [];
+            if (exportRouteStyle === 'gradient' && routeGeo.length >= 2) {
+                routeSegments = buildExportRouteSegments(routeSource);
+                if (!routeSegments.length) {
+                    routeSegments = [{ color: exportRouteColor, geometry: routeGeo }];
+                }
+            }
+
+            const src = optimizedRoute.length ? getVisibleRoutePoints(optimizedRoute) : points;
+            let wps = src.map((point, index) => ({
+                lat: point.lat,
+                lng: point.lng,
+                routeKey: point.routeKey || '',
+                id: point.id || '',
+                rank: index + 1
+            }));
+            if (exportPointVis === 'start_end' && wps.length > 2) {
+                wps = [wps[0], wps[wps.length - 1]];
+            }
+
+            return {
+                bounds: exportBounds,
+                width: dims.width,
+                height: dims.height,
+                format: preview ? 'png' : exportFormat,
+                map_style: exportMapStyle,
+                show_route: exportShowRoute,
+                route_style: exportRouteStyle,
+                route_color: exportRouteColor,
+                route_thickness: exportRouteThickness,
+                route_opacity: exportRouteOpacity / 100,
+                route_dashed: exportRouteStyle === 'solid' ? exportRouteDashed : false,
+                route_geometry: routeGeo,
+                route_segments: routeSegments,
+                show_points: exportPointVis !== 'none',
+                show_point_labels: exportShowLabels,
+                point_color: exportPointColor,
+                point_size: exportPointSize,
+                point_shape: exportPointShape,
+                point_visibility: exportPointVis,
+                waypoints: wps,
+            };
+        }
+
+        async function _renderExportPreview() {
+            if (!isExportMode) {
+                return;
+            }
+
+            const requestSeq = ++_exportPreviewSeq;
+            if (_exportPreviewAbort) {
+                _exportPreviewAbort.abort();
+            }
+
+            const controller = new AbortController();
+            _exportPreviewAbort = controller;
+
+            try {
+                const response = await fetch('/api/export-map', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(_buildExportPayload({ preview: true })),
+                    signal: controller.signal,
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.detail || 'Preview failed.');
+                }
+
+                const blob = await response.blob();
+                if (!isExportMode || requestSeq !== _exportPreviewSeq) {
+                    return;
+                }
+
+                const previewUrl = URL.createObjectURL(blob);
+                if (_exportPreviewOverlay) {
+                    map.removeLayer(_exportPreviewOverlay);
+                }
+                if (_exportPreviewUrl) {
+                    URL.revokeObjectURL(_exportPreviewUrl);
+                }
+
+                _exportPreviewOverlay = L.imageOverlay(
+                    previewUrl,
+                    [[exportBounds.south, exportBounds.west], [exportBounds.north, exportBounds.east]],
+                    { pane: 'exportPreviewPane', interactive: false, opacity: 1 }
+                ).addTo(map);
+                _exportPreviewUrl = previewUrl;
+            } catch (error) {
+                if (error.name !== 'AbortError') {
+                    console.error('Export preview failed', error);
+                }
+            } finally {
+                if (_exportPreviewAbort === controller) {
+                    _exportPreviewAbort = null;
+                }
+            }
         }
 
         function _redrawExportOverlays() {
-            _clearExportOverlays();
+            if (!isExportMode) {
+                return;
+            }
+
+            if (_exportPreviewTimer) {
+                clearTimeout(_exportPreviewTimer);
+            }
+            _exportPreviewTimer = setTimeout(() => {
+                _exportPreviewTimer = null;
+                _renderExportPreview();
+            }, 120);
+            return;
 
             // Route line
             if (exportShowRoute) {
@@ -2522,6 +2695,9 @@
             document.getElementById('exportWest').textContent  = f(exportBounds.west);
             const { width, height } = _computeExportDims(exportBounds, exportMaxDim);
             document.getElementById('exportDimsDisplay').textContent = `${width} × ${height}`;
+            if (isExportMode) {
+                _redrawExportOverlays();
+            }
         }
 
         function _makeExportHandle(type, lat, lng) {
@@ -2602,6 +2778,17 @@
                 b.className = `export-style-btn text-xs font-semibold py-1.5 rounded-lg border transition ${b.dataset.style === exportMapStyle ? 'export-active' : 'export-inactive'}`;
             });
         }
+        function _syncRouteStyleBtns() {
+            document.querySelectorAll('.export-route-style-btn').forEach((button) => {
+                button.className = `export-route-style-btn flex-1 py-1.5 text-[11px] font-semibold rounded-lg border transition ${button.dataset.routeStyle === exportRouteStyle ? 'export-active' : 'export-inactive'}`;
+            });
+        }
+        function _syncRouteControlState() {
+            document.getElementById('exportRoutePrimaryColorLabel').textContent = exportRouteStyle === 'gradient' ? 'Start color' : 'Color';
+            document.getElementById('exportRouteGradientEndWrap').classList.toggle('hidden', exportRouteStyle !== 'gradient');
+            document.getElementById('exportRouteDashWrap').classList.toggle('hidden', exportRouteStyle !== 'solid');
+            document.getElementById('exportRouteGradientHint').classList.toggle('hidden', exportRouteStyle !== 'gradient');
+        }
         function _syncResBtns() {
             const PRESETS = [1024, 2048, 4096];
             document.querySelectorAll('.export-res-btn').forEach(b => {
@@ -2651,6 +2838,8 @@
             drawExportBoundingBox();
             _updateBoundsDisplay();
             _syncStyleBtns();
+            _syncRouteStyleBtns();
+            _syncRouteControlState();
             _syncResBtns();
             _syncShapeBtns();
             _redrawExportOverlays();
@@ -2702,37 +2891,8 @@
             statusEl.textContent = '';
             statusEl.classList.add('hidden');
 
-            const { width, height } = _computeExportDims(exportBounds, exportMaxDim);
-
-            const routeGeo = drivingPathGeometry.length >= 2
-                ? drivingPathGeometry.map(p => ({ lat: p.lat, lng: p.lng }))
-                : optimizedRoute.length >= 2
-                    ? optimizedRoute.map(p => ({ lat: p.lat, lng: p.lng }))
-                    : [];
-
-            const src = optimizedRoute.length ? getVisibleRoutePoints(optimizedRoute) : points;
-            let wps = src.map((p, i) => ({ lat: p.lat, lng: p.lng, routeKey: p.routeKey || '', id: p.id || '', rank: i + 1 }));
-            if (exportPointVis === 'start_end' && wps.length > 2) wps = [wps[0], wps[wps.length - 1]];
-
-            const payload = {
-                bounds:            exportBounds,
-                width, height,
-                format:            exportFormat,
-                map_style:         exportMapStyle,
-                show_route:        exportShowRoute,
-                route_color:       exportRouteColor,
-                route_thickness:   exportRouteThickness,
-                route_opacity:     exportRouteOpacity / 100,
-                route_dashed:      exportRouteDashed,
-                route_geometry:    routeGeo,
-                show_points:       exportPointVis !== 'none',
-                show_point_labels: exportShowLabels,
-                point_color:       exportPointColor,
-                point_size:        exportPointSize,
-                point_shape:       exportPointShape,
-                point_visibility:  exportPointVis,
-                waypoints:         wps,
-            };
+            const payload = _buildExportPayload();
+            const { width, height } = payload;
 
             try {
                 const resp = await fetch('/api/export-map', {
@@ -2770,7 +2930,10 @@
         document.querySelectorAll('.export-style-btn').forEach(btn => btn.addEventListener('click', () => {
             exportMapStyle = btn.dataset.style;
             _syncStyleBtns();
-            if (isExportMode) _setTileLayer((_styleToLayer[exportMapStyle] || _styleToLayer.voyager)());
+            if (isExportMode) {
+                _setTileLayer((_styleToLayer[exportMapStyle] || _styleToLayer.voyager)());
+                _redrawExportOverlays();
+            }
         }));
 
         document.querySelectorAll('.export-res-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -2801,8 +2964,18 @@
             document.getElementById('exportRouteControls').style.opacity = exportShowRoute ? '1' : '0.4';
             if (isExportMode) _redrawExportOverlays();
         });
+        document.querySelectorAll('.export-route-style-btn').forEach(btn => btn.addEventListener('click', () => {
+            exportRouteStyle = btn.dataset.routeStyle || 'solid';
+            _syncRouteStyleBtns();
+            _syncRouteControlState();
+            if (isExportMode) _redrawExportOverlays();
+        }));
         document.getElementById('exportRouteColor').addEventListener('input', e => {
             exportRouteColor = e.target.value;
+            if (isExportMode) _redrawExportOverlays();
+        });
+        document.getElementById('exportRouteGradientEnd').addEventListener('input', e => {
+            exportRouteGradientEnd = e.target.value;
             if (isExportMode) _redrawExportOverlays();
         });
         document.getElementById('exportRouteThickness').addEventListener('input', e => {
@@ -2841,6 +3014,8 @@
 
         // Init button states
         _syncStyleBtns();
+        _syncRouteStyleBtns();
+        _syncRouteControlState();
         _syncResBtns();
         _syncShapeBtns();
     </script>
