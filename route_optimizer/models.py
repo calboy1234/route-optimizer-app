@@ -58,6 +58,7 @@ class MapExportRequest(BaseModel):
     show_point_labels: bool = True
     point_color: str = "#2563eb"
     point_size: float = Field(ge=2.0, le=40.0, default=9.0)
+    point_shape: Literal["circle", "pin"] = "circle"
     point_visibility: Literal["all", "start_end", "none"] = "all"
     waypoints: list[ExportWaypoint] = []
 

@@ -221,32 +221,62 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
 
         for i, wp in enumerate(wps):
             px, py = _e(wp.lat, wp.lng)
-            if px < -marker_r or px > tw + marker_r or py < -marker_r or py > th + marker_r:
+            if px < -marker_r * 3 or px > tw + marker_r * 3 or py < -marker_r * 3 or py > th + marker_r * 3:
                 continue
             fill = start_rgba if i == 0 else point_rgba
-            # White outer ring
-            draw.ellipse([(px - marker_r - 2, py - marker_r - 2),
-                          (px + marker_r + 2, py + marker_r + 2)], fill=(255, 255, 255, 235))
-            # Coloured fill
-            draw.ellipse([(px - marker_r, py - marker_r),
-                          (px + marker_r, py + marker_r)], fill=fill)
-            # Inner white dot
-            ir = max(1, marker_r // 3)
-            draw.ellipse([(px - ir, py - ir), (px + ir, py + ir)], fill=(255, 255, 255, 220))
+
+            if req.point_shape == "pin":
+                # Teardrop: circle body + downward triangle tail
+                pin_r  = max(4, round(req.point_size * scale_f * 0.7))
+                tail_h = max(4, round(pin_r * 1.4))
+                cx, cy = int(px), int(py - tail_h)     # pin body centre
+
+                # White outer ring
+                draw.ellipse([(cx - pin_r - 2, cy - pin_r - 2),
+                              (cx + pin_r + 2, cy + pin_r + 2)],
+                             fill=(255, 255, 255, 235))
+                # Coloured body
+                draw.ellipse([(cx - pin_r, cy - pin_r),
+                              (cx + pin_r, cy + pin_r)],
+                             fill=fill)
+                # Tail triangle pointing downward to (px, py)
+                tri = [(cx - pin_r // 2, cy + pin_r // 2),
+                       (cx + pin_r // 2, cy + pin_r // 2),
+                       (int(px), int(py))]
+                draw.polygon(tri, fill=fill)
+                # White inner dot
+                ir = max(1, pin_r // 3)
+                draw.ellipse([(cx - ir, cy - ir), (cx + ir, cy + ir)],
+                             fill=(255, 255, 255, 210))
+
+                label_ox, label_oy = cx + pin_r + 5, cy - pin_r
+
+            else:
+                # Circle (default)
+                # White outer ring
+                draw.ellipse([(px - marker_r - 2, py - marker_r - 2),
+                              (px + marker_r + 2, py + marker_r + 2)],
+                             fill=(255, 255, 255, 235))
+                draw.ellipse([(px - marker_r, py - marker_r),
+                              (px + marker_r, py + marker_r)], fill=fill)
+                ir = max(1, marker_r // 3)
+                draw.ellipse([(px - ir, py - ir), (px + ir, py + ir)],
+                             fill=(255, 255, 255, 220))
+
+                label_ox, label_oy = int(px + marker_r + 5), int(py - marker_r)
 
             if req.show_point_labels and wp.id:
                 label = wp.id if len(wp.id) <= 28 else wp.id[:26] + "…"
-                tx, ty_l = int(px + marker_r + 5), int(py - marker_r)
                 try:
-                    bbox = draw.textbbox((tx, ty_l), label, font=font)
+                    bbox = draw.textbbox((label_ox, label_oy), label, font=font)
                     draw.rectangle(
                         [bbox[0] - 2, bbox[1] - 2, bbox[2] + 2, bbox[3] + 2],
                         fill=(255, 255, 255, 200),
                     )
                 except AttributeError:
                     pass
-                draw.text((tx + 1, ty_l + 1), label, font=font, fill=(0, 0, 0, 90))
-                draw.text((tx, ty_l),          label, font=font, fill=(20, 20, 20, 230))
+                draw.text((label_ox + 1, label_oy + 1), label, font=font, fill=(0, 0, 0, 90))
+                draw.text((label_ox, label_oy),          label, font=font, fill=(20, 20, 20, 230))
 
     # ── Encode ────────────────────────────────────────────────────────────────
     out = io.BytesIO()
