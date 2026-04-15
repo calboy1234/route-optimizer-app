@@ -19,7 +19,7 @@ from route_optimizer.solver import (
     calculate_route_metrics,
     expand_block_route,
     get_osrm_matrices,
-    get_osrm_route_geometry,
+    get_osrm_route_path,
     normalize_lock_group,
     solve_tsp_open,
     validate_cost_matrix,
@@ -50,6 +50,10 @@ _OSM_SUBS   = ["a", "b", "c"]
 _TILE_PX    = 256
 _MAX_TILES  = 225   # 15 × 15 grid cap
 _MAX_ZOOM   = 17
+
+
+class MapTileFetchError(RuntimeError):
+    """Raised when the export renderer cannot fetch a required map tile."""
 
 
 def _tile_y_f(lat: float, zoom: int) -> float:
@@ -86,8 +90,8 @@ def _fetch_tile(args: tuple) -> tuple:
         r = _req.get(url, timeout=15, headers={"User-Agent": "RouteOptimizerApp/1.0"})
         r.raise_for_status()
         return x, y, Image.open(io.BytesIO(r.content)).convert("RGBA")
-    except Exception:
-        return x, y, Image.new("RGBA", (_TILE_PX, _TILE_PX), (210, 210, 210, 255))
+    except Exception as exc:
+        raise MapTileFetchError(f"Failed to fetch map tile {z}/{x}/{y} from {url}.") from exc
 
 
 def _hex_rgba(hex_color: str, alpha: float = 1.0) -> tuple:
@@ -311,6 +315,8 @@ def export_map(request: MapExportRequest) -> Response:
     """Render a high-resolution map image and stream it back."""
     try:
         image_bytes, content_type = _render_export(request)
+    except MapTileFetchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -402,13 +408,14 @@ def optimize_route(request: RouteRequest):
             ordered_points.append(point)
             ordered_locations.append({
                 "id": point.id,
+                "route_key": point.route_key or point.id,
                 "lat": point.lat,
                 "lng": point.lng,
                 "snapped": snapped_lookup.get(index),
                 "lock_group": normalize_lock_group(point.lock_group),
             })
 
-        road_geometry = get_osrm_route_geometry(current_settings.osrm_url, ordered_points)
+        route_path = get_osrm_route_path(current_settings.osrm_url, ordered_points)
 
         return {
             "status": "success",
@@ -417,10 +424,10 @@ def optimize_route(request: RouteRequest):
             "must_end_at_last": request.must_end_at_last,
             "metrics": metrics,
             "optimized_route": ordered_locations,
-            "road_geometry": road_geometry,
+            "road_geometry": route_path["geometry"],
+            "road_legs": route_path["legs"],
         }
     except RouteValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UpstreamRoutingError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-

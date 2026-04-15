@@ -9,6 +9,7 @@ class Point(BaseModel):
     id: str
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
+    route_key: str | None = None
     lock_group: str | None = None
 
 
@@ -61,4 +62,3 @@ class MapExportRequest(BaseModel):
     point_shape: Literal["circle", "pin"] = "circle"
     point_visibility: Literal["all", "start_end", "none"] = "all"
     waypoints: list[ExportWaypoint] = []
-

@@ -2,6 +2,7 @@ from route_optimizer.models import Point
 from route_optimizer.solver import (
     RouteValidationError,
     build_locked_blocks,
+    get_osrm_route_path,
     solve_tsp_open,
     validate_cost_matrix,
 )
@@ -53,3 +54,57 @@ def test_validate_cost_matrix_rejects_unreachable_pairs():
     else:
         raise AssertionError("Expected RouteValidationError for unreachable waypoints")
 
+
+def test_get_osrm_route_path_merges_leg_step_geometry(monkeypatch):
+    def fake_fetch_osrm_json(url):
+        return {
+            "code": "Ok",
+            "routes": [{
+                "geometry": {
+                    "coordinates": [[-97.0, 49.0], [-97.05, 49.05], [-97.1, 49.1]],
+                },
+                "legs": [
+                    {
+                        "steps": [
+                            {"geometry": {"coordinates": [[-97.0, 49.0], [-97.02, 49.02]]}},
+                            {"geometry": {"coordinates": [[-97.02, 49.02], [-97.05, 49.05]]}},
+                        ]
+                    },
+                    {
+                        "steps": [
+                            {"geometry": {"coordinates": [[-97.05, 49.05], [-97.08, 49.08]]}},
+                            {"geometry": {"coordinates": [[-97.08, 49.08], [-97.1, 49.1]]}},
+                        ]
+                    },
+                ],
+            }],
+        }
+
+    monkeypatch.setattr("route_optimizer.solver.fetch_osrm_json", fake_fetch_osrm_json)
+
+    route = get_osrm_route_path(
+        "http://osrm.test",
+        [
+            Point(id="A", lat=49.0, lng=-97.0),
+            Point(id="B", lat=49.05, lng=-97.05),
+            Point(id="C", lat=49.1, lng=-97.1),
+        ],
+    )
+
+    assert route["geometry"] == [
+        {"lat": 49.0, "lng": -97.0},
+        {"lat": 49.05, "lng": -97.05},
+        {"lat": 49.1, "lng": -97.1},
+    ]
+    assert route["legs"] == [
+        [
+            {"lat": 49.0, "lng": -97.0},
+            {"lat": 49.02, "lng": -97.02},
+            {"lat": 49.05, "lng": -97.05},
+        ],
+        [
+            {"lat": 49.05, "lng": -97.05},
+            {"lat": 49.08, "lng": -97.08},
+            {"lat": 49.1, "lng": -97.1},
+        ],
+    ]

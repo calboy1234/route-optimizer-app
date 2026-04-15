@@ -43,20 +43,7 @@ def get_osrm_matrices(osrm_url: str, locations: list[Point]):
     return data.get("durations"), data.get("distances"), data.get("sources", [])
 
 
-def get_osrm_route_geometry(osrm_url: str, locations: list[Point]):
-    """Fetch the actual drivable path for the ordered waypoints."""
-    coords = ";".join(f"{loc.lng},{loc.lat}" for loc in locations)
-    url = (
-        f"{osrm_url}/route/v1/driving/{coords}"
-        "?overview=full&geometries=geojson&steps=false"
-    )
-    data = fetch_osrm_json(url)
-    routes = data.get("routes", [])
-    if not routes:
-        raise UpstreamRoutingError("OSRM returned no drivable path.")
-
-    geometry = routes[0].get("geometry", {})
-    coordinates = geometry.get("coordinates", [])
+def _coordinates_to_latlngs(coordinates: list[Any]) -> list[dict[str, float]]:
     return [
         {
             "lat": coordinate[1],
@@ -65,6 +52,102 @@ def get_osrm_route_geometry(osrm_url: str, locations: list[Point]):
         for coordinate in coordinates
         if isinstance(coordinate, list) and len(coordinate) == 2
     ]
+
+
+def _merge_path_segments(path_segments: list[list[dict[str, float]]]) -> list[dict[str, float]]:
+    merged: list[dict[str, float]] = []
+    for segment in path_segments:
+        if not segment:
+            continue
+        if not merged:
+            merged.extend(segment)
+            continue
+
+        start_index = 1 if merged[-1] == segment[0] else 0
+        merged.extend(segment[start_index:])
+
+    return merged
+
+
+def _fetch_osrm_route(osrm_url: str, locations: list[Point], *, steps: bool) -> dict[str, Any]:
+    coords = ";".join(f"{loc.lng},{loc.lat}" for loc in locations)
+    url = (
+        f"{osrm_url}/route/v1/driving/{coords}"
+        f"?overview=full&geometries=geojson&steps={'true' if steps else 'false'}"
+    )
+    data = fetch_osrm_json(url)
+    routes = data.get("routes", [])
+    if not routes:
+        raise UpstreamRoutingError("OSRM returned no drivable path.")
+
+    route = routes[0]
+    if not isinstance(route, dict):
+        raise UpstreamRoutingError("OSRM returned an invalid route payload.")
+    return route
+
+
+def get_osrm_route_geometry(osrm_url: str, locations: list[Point]):
+    """Fetch the actual drivable path for the ordered waypoints."""
+    route = _fetch_osrm_route(osrm_url, locations, steps=False)
+    geometry = route.get("geometry", {})
+    coordinates = geometry.get("coordinates", []) if isinstance(geometry, dict) else []
+    return _coordinates_to_latlngs(coordinates)
+
+
+def get_osrm_route_path(osrm_url: str, locations: list[Point]) -> dict[str, Any]:
+    """Fetch full route geometry plus per-leg geometry for each adjacent waypoint pair."""
+    if len(locations) < 2:
+        return {"geometry": [], "legs": []}
+
+    route = _fetch_osrm_route(osrm_url, locations, steps=True)
+    geometry = route.get("geometry", {})
+    coordinates = geometry.get("coordinates", []) if isinstance(geometry, dict) else []
+    overview_geometry = _coordinates_to_latlngs(coordinates)
+    if not overview_geometry:
+        raise UpstreamRoutingError("OSRM returned no drivable path.")
+
+    legs = route.get("legs", [])
+    leg_geometries: list[list[dict[str, float]]] = []
+    if isinstance(legs, list):
+        for leg in legs:
+            if not isinstance(leg, dict):
+                leg_geometries = []
+                break
+
+            steps = leg.get("steps", [])
+            if not isinstance(steps, list):
+                leg_geometries = []
+                break
+
+            step_segments = []
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                step_geometry = step.get("geometry", {})
+                if not isinstance(step_geometry, dict):
+                    continue
+                step_coordinates = step_geometry.get("coordinates", [])
+                segment = _coordinates_to_latlngs(step_coordinates)
+                if segment:
+                    step_segments.append(segment)
+
+            if not step_segments:
+                leg_geometries = []
+                break
+
+            leg_geometries.append(_merge_path_segments(step_segments))
+
+    expected_leg_count = len(locations) - 1
+    if len(leg_geometries) != expected_leg_count:
+        leg_geometries = [
+            get_osrm_route_geometry(osrm_url, locations[index:index + 2])
+            for index in range(expected_leg_count)
+        ]
+
+    return {
+        "geometry": overview_geometry,
+        "legs": leg_geometries,
+    }
 
 
 def calculate_route_metrics(route_indices, duration_matrix, distance_matrix):
@@ -239,4 +322,3 @@ def solve_tsp_open(cost_matrix, fixed_end_node: int | None = None):
             route_indices.append(end_node)
 
     return route_indices
-

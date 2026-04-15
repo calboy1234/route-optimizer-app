@@ -477,6 +477,7 @@
         let drivingPathLine = null;
         let drivingPathArrows = [];
         let drivingPathGeometry = [];
+        let drivingPathLegGeometry = [];
         let snapLines = [];
         let snapDots = [];
         let isPlacementMode = false;
@@ -1208,6 +1209,7 @@
             drivingPathArrows.forEach((arrow) => map.removeLayer(arrow));
             drivingPathArrows = [];
             drivingPathGeometry = [];
+            drivingPathLegGeometry = [];
         }
 
         function clearSnapLines() {
@@ -1221,6 +1223,7 @@
             optimizedRoute = [];
             hasSummary = false;
             drivingPathGeometry = [];
+            drivingPathLegGeometry = [];
             points.forEach((point) => {
                 point.rank = null;
                 delete point.snapped;
@@ -1273,9 +1276,86 @@
             return closestIndex;
         }
 
+        function mergeDrivingLegLatLngs(legs) {
+            const merged = [];
+            legs.forEach((leg) => {
+                if (!Array.isArray(leg)) {
+                    return;
+                }
+
+                leg.forEach((point) => {
+                    const lat = Number(point && point.lat);
+                    const lng = Number(point && point.lng);
+                    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                        return;
+                    }
+
+                    const lastPoint = merged[merged.length - 1];
+                    if (lastPoint && Math.abs(lastPoint[0] - lat) < 0.0000001 && Math.abs(lastPoint[1] - lng) < 0.0000001) {
+                        return;
+                    }
+
+                    merged.push([lat, lng]);
+                });
+            });
+
+            return merged;
+        }
+
+        function buildDrivingPathColorSegmentsFromLegs(routePoints) {
+            if (!drivingPathLegGeometry.length || routePoints.length < 2) {
+                return [];
+            }
+
+            const visibleRoutePoints = getVisibleRoutePoints(routePoints);
+            if (visibleRoutePoints.length < 2) {
+                const mergedLatLngs = mergeDrivingLegLatLngs(drivingPathLegGeometry);
+                return mergedLatLngs.length >= 2
+                    ? [{
+                        latLngs: mergedLatLngs,
+                        color: getDrivingPathSegmentColors(1)[0]
+                    }]
+                    : [];
+            }
+
+            const segmentLegGroups = [];
+            let currentLegGroup = [];
+            let hasVisibleAnchor = !isRoutingOnlyPoint(routePoints[0]);
+
+            for (let index = 0; index < routePoints.length - 1; index += 1) {
+                const fromPoint = routePoints[index];
+                const toPoint = routePoints[index + 1];
+                const leg = Array.isArray(drivingPathLegGeometry[index]) ? drivingPathLegGeometry[index] : [];
+
+                if (!hasVisibleAnchor && !isRoutingOnlyPoint(fromPoint)) {
+                    hasVisibleAnchor = true;
+                }
+
+                if (hasVisibleAnchor) {
+                    currentLegGroup.push(leg);
+                }
+
+                if (hasVisibleAnchor && !isRoutingOnlyPoint(toPoint)) {
+                    segmentLegGroups.push(currentLegGroup);
+                    currentLegGroup = [];
+                }
+            }
+
+            const segmentColors = getDrivingPathSegmentColors(Math.max(segmentLegGroups.length, 1));
+            return segmentLegGroups.map((legGroup, index) => ({
+                latLngs: mergeDrivingLegLatLngs(legGroup),
+                color: segmentColors[index]
+            })).filter((segment) => segment.latLngs.length >= 2);
+        }
+
         function buildDrivingPathColorSegments(routePoints) {
             if (drivingPathGeometry.length < 2) {
                 return [];
+            }
+
+            const legBasedSegments = buildDrivingPathColorSegmentsFromLegs(routePoints);
+            if (legBasedSegments.length) {
+                return legBasedSegments;
             }
 
             const visibleRoutePoints = getVisibleRoutePoints(routePoints);
@@ -1930,6 +2010,10 @@
         });
 
         map.on('click', (event) => {
+            if (isExportMode) {
+                return;
+            }
+
             if (isZonePlacementMode) {
                 inclusionZoneVertices.push({
                     lat: roundCoord(event.latlng.lat),
@@ -2023,7 +2107,8 @@
                         optimize_for: optimizeFor,
                         must_end_at_last: mustEndAtLast,
                         locations: includedPoints.map((point) => ({
-                            id: point.routeKey,
+                            id: point.id,
+                            route_key: point.routeKey,
                             lat: point.lat,
                             lng: point.lng,
                             lock_group: point.lockGroup || null
@@ -2038,10 +2123,11 @@
 
                 if (data && data.status === 'success') {
                     optimizedRoute = data.optimized_route.map((routePoint) => {
-                        const localPoint = points.find((point) => point.routeKey === routePoint.id);
+                        const routeKey = routePoint.route_key || routePoint.id;
+                        const localPoint = points.find((point) => point.routeKey === routeKey);
                         return {
-                            id: localPoint ? localPoint.id : routePoint.id,
-                            routeKey: routePoint.id,
+                            id: routePoint.id || (localPoint ? localPoint.id : routeKey),
+                            routeKey,
                             lat: routePoint.lat,
                             lng: routePoint.lng,
                             snapped: routePoint.snapped || null,
@@ -2049,6 +2135,7 @@
                         };
                     });
                     drivingPathGeometry = Array.isArray(data.road_geometry) ? data.road_geometry : [];
+                    drivingPathLegGeometry = Array.isArray(data.road_legs) ? data.road_legs : [];
                     const optimizedPointLookup = new Map(
                         optimizedRoute.map((routePoint) => [routePoint.routeKey, routePoint])
                     );
@@ -2159,6 +2246,10 @@
         let _tileLayerBeforeExport = null;
         let _exportRouteLine     = null;
         let _exportMarkers       = [];
+        let _exportInteractionState = null;
+        const EXPORT_LAT_LIMIT = 85;
+        const EXPORT_LNG_LIMIT = 180;
+        const EXPORT_MIN_SPAN = 0.0005;
 
         // ── Tile math — mirrors Python backend exactly ────────────────────────
         function _tileXF(lng, zoom) {
@@ -2187,6 +2278,109 @@
             return ratio >= 1
                 ? { width: maxDim, height: Math.max(1, Math.round(maxDim / ratio)) }
                 : { width: Math.max(1, Math.round(maxDim * ratio)), height: maxDim };
+        }
+
+        function _clamp(value, min, max) {
+            return Math.min(max, Math.max(min, value));
+        }
+
+        function _normalizeExportBounds(bounds) {
+            let north = _clamp(Number(bounds.north), -EXPORT_LAT_LIMIT, EXPORT_LAT_LIMIT);
+            let south = _clamp(Number(bounds.south), -EXPORT_LAT_LIMIT, EXPORT_LAT_LIMIT);
+            let east = _clamp(Number(bounds.east), -EXPORT_LNG_LIMIT, EXPORT_LNG_LIMIT);
+            let west = _clamp(Number(bounds.west), -EXPORT_LNG_LIMIT, EXPORT_LNG_LIMIT);
+
+            if (north < south) {
+                [north, south] = [south, north];
+            }
+            if (east < west) {
+                [east, west] = [west, east];
+            }
+
+            if ((north - south) < EXPORT_MIN_SPAN) {
+                const midLat = (north + south) / 2;
+                north = _clamp(midLat + (EXPORT_MIN_SPAN / 2), -EXPORT_LAT_LIMIT, EXPORT_LAT_LIMIT);
+                south = _clamp(midLat - (EXPORT_MIN_SPAN / 2), -EXPORT_LAT_LIMIT, EXPORT_LAT_LIMIT);
+                if ((north - south) < EXPORT_MIN_SPAN) {
+                    south = Math.max(-EXPORT_LAT_LIMIT, north - EXPORT_MIN_SPAN);
+                    north = Math.min(EXPORT_LAT_LIMIT, south + EXPORT_MIN_SPAN);
+                }
+            }
+
+            if ((east - west) < EXPORT_MIN_SPAN) {
+                const midLng = (east + west) / 2;
+                east = _clamp(midLng + (EXPORT_MIN_SPAN / 2), -EXPORT_LNG_LIMIT, EXPORT_LNG_LIMIT);
+                west = _clamp(midLng - (EXPORT_MIN_SPAN / 2), -EXPORT_LNG_LIMIT, EXPORT_LNG_LIMIT);
+                if ((east - west) < EXPORT_MIN_SPAN) {
+                    west = Math.max(-EXPORT_LNG_LIMIT, east - EXPORT_MIN_SPAN);
+                    east = Math.min(EXPORT_LNG_LIMIT, west + EXPORT_MIN_SPAN);
+                }
+            }
+
+            return { north, south, east, west };
+        }
+
+        function _translateExportBounds(deltaLat, deltaLng, baseBounds = exportBounds) {
+            let north = baseBounds.north + deltaLat;
+            let south = baseBounds.south + deltaLat;
+            let east = baseBounds.east + deltaLng;
+            let west = baseBounds.west + deltaLng;
+
+            if (north > EXPORT_LAT_LIMIT) {
+                south -= north - EXPORT_LAT_LIMIT;
+                north = EXPORT_LAT_LIMIT;
+            }
+            if (south < -EXPORT_LAT_LIMIT) {
+                north += -EXPORT_LAT_LIMIT - south;
+                south = -EXPORT_LAT_LIMIT;
+            }
+            if (east > EXPORT_LNG_LIMIT) {
+                west -= east - EXPORT_LNG_LIMIT;
+                east = EXPORT_LNG_LIMIT;
+            }
+            if (west < -EXPORT_LNG_LIMIT) {
+                east += -EXPORT_LNG_LIMIT - west;
+                west = -EXPORT_LNG_LIMIT;
+            }
+
+            return _normalizeExportBounds({ north, south, east, west });
+        }
+
+        function _suspendEditorModesForExport() {
+            _exportInteractionState = {
+                placementMode: isPlacementMode,
+                zonePlacementMode: isZonePlacementMode,
+            };
+
+            if (isZonePlacementMode) {
+                setZonePlacementMode(false);
+            }
+            if (isPlacementMode) {
+                setPlacementMode(false);
+            }
+
+            clearInclusionZoneLayers();
+        }
+
+        function _restoreEditorModesAfterExport() {
+            const previousState = _exportInteractionState;
+            _exportInteractionState = null;
+
+            if (hasInclusionZone() || inclusionZoneVertices.length) {
+                redrawInclusionZone();
+            }
+
+            if (previousState && previousState.zonePlacementMode) {
+                setZonePlacementMode(true);
+                return;
+            }
+
+            if (previousState && previousState.placementMode) {
+                setPlacementMode(true);
+                return;
+            }
+
+            updatePlacementHint();
         }
 
         // ── Tile layer management ─────────────────────────────────────────────
@@ -2312,12 +2506,12 @@
                       : points;
             if (!src.length) {
                 const c = map.getCenter();
-                return { north: c.lat + 0.025, south: c.lat - 0.025, east: c.lng + 0.04, west: c.lng - 0.04 };
+                return _normalizeExportBounds({ north: c.lat + 0.025, south: c.lat - 0.025, east: c.lng + 0.04, west: c.lng - 0.04 });
             }
             let n = -90, s = 90, e = -180, w = 180;
             src.forEach(p => { n = Math.max(n, p.lat); s = Math.min(s, p.lat); e = Math.max(e, p.lng); w = Math.min(w, p.lng); });
             const lp = Math.max((n - s) * 0.18, 0.006), lnp = Math.max((e - w) * 0.18, 0.006);
-            return { north: Math.min(85, n + lp), south: Math.max(-85, s - lp), east: Math.min(180, e + lnp), west: Math.max(-180, w - lnp) };
+            return _normalizeExportBounds({ north: Math.min(85, n + lp), south: Math.max(-85, s - lp), east: Math.min(180, e + lnp), west: Math.max(-180, w - lnp) });
         }
 
         function _updateBoundsDisplay() {
@@ -2357,10 +2551,10 @@
             }));
 
             // Corners — drag changes two bounds
-            [{ lat: north, lng: west,  fn: ll => { exportBounds.north = ll.lat; exportBounds.west = ll.lng; } },
-             { lat: north, lng: east,  fn: ll => { exportBounds.north = ll.lat; exportBounds.east = ll.lng; } },
-             { lat: south, lng: east,  fn: ll => { exportBounds.south = ll.lat; exportBounds.east = ll.lng; } },
-             { lat: south, lng: west,  fn: ll => { exportBounds.south = ll.lat; exportBounds.west = ll.lng; } }
+            [{ lat: north, lng: west,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat, west: ll.lng }); } },
+             { lat: north, lng: east,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat, east: ll.lng }); } },
+             { lat: south, lng: east,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat, east: ll.lng }); } },
+             { lat: south, lng: west,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat, west: ll.lng }); } }
             ].forEach(({ lat, lng, fn }) => {
                 const h = _makeExportHandle('corner', lat, lng);
                 h.on('drag', e => { fn(e.target.getLatLng()); _refreshBboxRect(); _updateBoundsDisplay(); });
@@ -2370,10 +2564,10 @@
             });
 
             // Edge midpoints — drag changes one bound
-            [{ lat: north,  lng: midLng, fn: ll => { exportBounds.north = ll.lat; } },
-             { lat: south,  lng: midLng, fn: ll => { exportBounds.south = ll.lat; } },
-             { lat: midLat, lng: east,   fn: ll => { exportBounds.east  = ll.lng; } },
-             { lat: midLat, lng: west,   fn: ll => { exportBounds.west  = ll.lng; } }
+            [{ lat: north,  lng: midLng, fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat }); } },
+             { lat: south,  lng: midLng, fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat }); } },
+             { lat: midLat, lng: east,   fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, east: ll.lng }); } },
+             { lat: midLat, lng: west,   fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, west: ll.lng }); } }
             ].forEach(({ lat, lng, fn }) => {
                 const h = _makeExportHandle('edge', lat, lng);
                 h.on('drag', e => { fn(e.target.getLatLng()); _refreshBboxRect(); _updateBoundsDisplay(); });
@@ -2390,7 +2584,7 @@
                 if (!_sb) return;
                 const ll = e.target.getLatLng();
                 const dLat = ll.lat - _sll.lat, dLng = ll.lng - _sll.lng;
-                exportBounds = { north: _sb.north + dLat, south: _sb.south + dLat, east: _sb.east + dLng, west: _sb.west + dLng };
+                exportBounds = _translateExportBounds(dLat, dLng, _sb);
                 _refreshBboxRect(); _updateBoundsDisplay();
             });
             ch.on('dragend', () => { _sb = null; _sll = null; drawExportBoundingBox(); });
@@ -2427,6 +2621,7 @@
         function enterExportMode() {
             if (isExportMode) return;
             isExportMode = true;
+            _suspendEditorModesForExport();
 
             // Collapse sidebar to free map space; hide the sidebar toggle (we control collapse state)
             setSidebarCollapsed(true);
@@ -2490,6 +2685,7 @@
             if (showDrivingPath && drivingPathGeometry.length >= 2) drawDrivingPath();
             if (showRouteLine   && optimizedRoute.length >= 2)      drawOptimizedRoute(optimizedRoute);
             if (showSnapGuides)                                       drawSnapLines();
+            _restoreEditorModesAfterExport();
 
             resetMapView();
 
