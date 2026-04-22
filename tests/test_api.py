@@ -193,3 +193,133 @@ def test_export_map_label_size_changes_rendered_output(monkeypatch):
     assert large_bbox is not None
     assert (large_bbox[2] - large_bbox[0]) > (small_bbox[2] - small_bbox[0])
     assert (large_bbox[3] - large_bbox[1]) >= (small_bbox[3] - small_bbox[1])
+
+
+def _route_export_payload():
+    return {
+        "bounds": {
+            "north": 49.94,
+            "south": 49.86,
+            "east": -97.04,
+            "west": -97.16,
+        },
+        "width": 512,
+        "height": 512,
+        "format": "transparent",
+        "show_route": True,
+        "show_points": False,
+        "route_color": "#2563eb",
+        "route_geometry": [
+            {"lat": 49.87, "lng": -97.15},
+            {"lat": 49.89, "lng": -97.12},
+            {"lat": 49.91, "lng": -97.09},
+            {"lat": 49.93, "lng": -97.06},
+        ],
+    }
+
+
+def test_export_map_direction_modes_render_output(monkeypatch):
+    client = get_test_client(monkeypatch)
+
+    for mode in ["arrows", "chevrons", "dashed_arrows", "dots"]:
+        response = client.post(
+            "/api/export-map",
+            json={
+                **_route_export_payload(),
+                "direction_mode": mode,
+                "direction_color": "#ffffff",
+                "direction_density": 65,
+                "direction_size": 18,
+            },
+        )
+
+        assert response.status_code == 200
+        assert len(response.content) > 0
+        assert Image.open(io.BytesIO(response.content)).getbbox() is not None
+
+
+def test_export_map_direction_density_changes_rendered_output(monkeypatch):
+    client = get_test_client(monkeypatch)
+    base_payload = {
+        **_route_export_payload(),
+        "direction_mode": "arrows",
+        "direction_color": "#ffffff",
+        "direction_size": 18,
+    }
+
+    sparse_response = client.post("/api/export-map", json={**base_payload, "direction_density": 15})
+    dense_response = client.post("/api/export-map", json={**base_payload, "direction_density": 90})
+
+    assert sparse_response.status_code == 200
+    assert dense_response.status_code == 200
+    assert sparse_response.content != dense_response.content
+
+
+def test_export_map_label_text_color_changes_rendered_output(monkeypatch):
+    client = get_test_client(monkeypatch)
+    base_payload = {
+        "bounds": {
+            "north": 49.91,
+            "south": 49.89,
+            "east": -97.09,
+            "west": -97.11,
+        },
+        "width": 512,
+        "height": 512,
+        "format": "transparent",
+        "show_route": False,
+        "show_points": True,
+        "show_point_labels": True,
+        "point_size": 8,
+        "label_bg_enabled": False,
+        "waypoints": [
+            {
+                "lat": 49.9,
+                "lng": -97.1,
+                "id": "Waypoint Label",
+            }
+        ],
+    }
+
+    dark_response = client.post("/api/export-map", json={**base_payload, "label_text_color": "#000000"})
+    red_response = client.post("/api/export-map", json={**base_payload, "label_text_color": "#ff0000"})
+
+    assert dark_response.status_code == 200
+    assert red_response.status_code == 200
+    assert dark_response.content != red_response.content
+
+
+def test_export_map_label_background_toggle_changes_rendered_output(monkeypatch):
+    client = get_test_client(monkeypatch)
+    base_payload = {
+        "bounds": {
+            "north": 49.91,
+            "south": 49.89,
+            "east": -97.09,
+            "west": -97.11,
+        },
+        "width": 512,
+        "height": 512,
+        "format": "transparent",
+        "show_route": False,
+        "show_points": True,
+        "show_point_labels": True,
+        "point_size": 8,
+        "label_text_color": "#000000",
+        "label_bg_color": "#ffffff",
+        "label_bg_padding": 10,
+        "waypoints": [
+            {
+                "lat": 49.9,
+                "lng": -97.1,
+                "id": "Waypoint Label",
+            }
+        ],
+    }
+
+    bg_on_response = client.post("/api/export-map", json={**base_payload, "label_bg_enabled": True})
+    bg_off_response = client.post("/api/export-map", json={**base_payload, "label_bg_enabled": False})
+
+    assert bg_on_response.status_code == 200
+    assert bg_off_response.status_code == 200
+    assert bg_on_response.content != bg_off_response.content

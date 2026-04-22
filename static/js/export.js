@@ -11,12 +11,20 @@ let exportRouteGradientEnd = '#2563eb';
 let exportRouteThickness = 4;
 let exportRouteOpacity   = 85;       // 0–100 in UI
 let exportRouteDashed    = false;
+let exportDirectionMode  = 'none';
+let exportDirectionColor = '#ffffff';
+let exportDirectionDensity = 55;
+let exportDirectionSize  = 16;
 let exportPointVis       = 'all';
 let exportPointColor     = '#2563eb';
 let exportPointSize      = 40;
 let exportPointShape     = 'pin';   // 'circle' | 'pin' | future shapes
 let exportLabelSize      = 14;
 let exportShowLabels     = true;
+let exportLabelTextColor = '#000000';
+let exportLabelBgColor   = '#ffffff';
+let exportLabelBgPadding = 8;
+let exportLabelBgEnabled = true;
 let _tileLayerBeforeExport = null;
 let _exportPreviewOverlay = null;
 let _exportPreviewUrl    = null;
@@ -41,12 +49,20 @@ const EXPORT_DEFAULTS = {
     routeThickness: 4,
     routeOpacity: 85,
     routeDashed: false,
+    directionMode: 'none',
+    directionColor: '#ffffff',
+    directionDensity: 55,
+    directionSize: 16,
     pointVisibility: 'all',
     pointColor: '#2563eb',
     pointSize: 40,
     pointShape: 'pin',
     labelSize: 14,
     showLabels: true,
+    labelTextColor: '#000000',
+    labelBgColor: '#ffffff',
+    labelBgPadding: 8,
+    labelBgEnabled: true,
 };
 
 // ── Tile math — mirrors Python backend exactly ────────────────────────
@@ -305,6 +321,10 @@ function _buildExportPayload(options = {}) {
         route_thickness: exportRouteThickness,
         route_opacity: exportRouteOpacity / 100,
         route_dashed: exportRouteStyle === 'solid' ? exportRouteDashed : false,
+        direction_mode: exportDirectionMode,
+        direction_color: exportDirectionColor,
+        direction_density: exportDirectionDensity,
+        direction_size: exportDirectionSize,
         route_geometry: routeGeo,
         route_segments: routeSegments,
         show_points: exportPointVis !== 'none',
@@ -314,6 +334,10 @@ function _buildExportPayload(options = {}) {
         point_shape: exportPointShape,
         point_visibility: exportPointVis,
         label_size: exportLabelSize,
+        label_text_color: exportLabelTextColor,
+        label_bg_color: exportLabelBgColor,
+        label_bg_padding: exportLabelBgPadding,
+        label_bg_enabled: exportLabelBgEnabled,
         waypoints: wps,
     };
 }
@@ -397,12 +421,20 @@ function resetExportToDefaults() {
     exportRouteThickness = EXPORT_DEFAULTS.routeThickness;
     exportRouteOpacity = EXPORT_DEFAULTS.routeOpacity;
     exportRouteDashed = EXPORT_DEFAULTS.routeDashed;
+    exportDirectionMode = EXPORT_DEFAULTS.directionMode;
+    exportDirectionColor = EXPORT_DEFAULTS.directionColor;
+    exportDirectionDensity = EXPORT_DEFAULTS.directionDensity;
+    exportDirectionSize = EXPORT_DEFAULTS.directionSize;
     exportPointVis = EXPORT_DEFAULTS.pointVisibility;
     exportPointColor = EXPORT_DEFAULTS.pointColor;
     exportPointSize = EXPORT_DEFAULTS.pointSize;
     exportPointShape = EXPORT_DEFAULTS.pointShape;
     exportLabelSize = EXPORT_DEFAULTS.labelSize;
     exportShowLabels = EXPORT_DEFAULTS.showLabels;
+    exportLabelTextColor = EXPORT_DEFAULTS.labelTextColor;
+    exportLabelBgColor = EXPORT_DEFAULTS.labelBgColor;
+    exportLabelBgPadding = EXPORT_DEFAULTS.labelBgPadding;
+    exportLabelBgEnabled = EXPORT_DEFAULTS.labelBgEnabled;
 
     // Reset bounds to include everything
     exportBounds = _computeInitialExportBounds();
@@ -416,6 +448,12 @@ function resetExportToDefaults() {
     document.getElementById('exportRouteOpacity').value = exportRouteOpacity;
     document.getElementById('exportRouteOpacityVal').textContent = exportRouteOpacity;
     document.getElementById('exportRouteDashed').checked = false;
+    document.getElementById('exportDirectionMode').value = exportDirectionMode;
+    document.getElementById('exportDirectionColor').value = exportDirectionColor;
+    document.getElementById('exportDirectionDensity').value = exportDirectionDensity;
+    document.getElementById('exportDirectionDensityVal').textContent = exportDirectionDensity;
+    document.getElementById('exportDirectionSize').value = exportDirectionSize;
+    document.getElementById('exportDirectionSizeVal').textContent = exportDirectionSize;
     document.getElementById('exportPointVisibility').value = 'all';
     document.getElementById('exportPointColor').value = exportPointColor;
     document.getElementById('exportPointSize').value = exportPointSize;
@@ -423,16 +461,22 @@ function resetExportToDefaults() {
     document.getElementById('exportLabelSize').value = exportLabelSize;
     document.getElementById('exportLabelSizeVal').textContent = exportLabelSize;
     document.getElementById('exportShowLabels').checked = true;
+    document.getElementById('exportLabelTextColor').value = exportLabelTextColor;
+    document.getElementById('exportLabelBgColor').value = exportLabelBgColor;
+    document.getElementById('exportLabelBgPadding').value = exportLabelBgPadding;
+    document.getElementById('exportLabelBgPaddingVal').textContent = exportLabelBgPadding;
+    document.getElementById('exportLabelBgEnabled').checked = exportLabelBgEnabled;
     document.getElementById('exportFormat').value = exportFormat;
     document.getElementById('exportMaxDimInput').value = exportMaxDim;
     document.getElementById('exportRouteControls').style.opacity = exportShowRoute ? '1' : '0.4';
-    document.getElementById('exportPointControls').style.opacity = exportPointVis === 'none' ? '0.4' : '1';
 
     _syncStyleBtns();
     _syncRouteStyleBtns();
     _syncRouteControlState();
+    _syncDirectionControlState();
     _syncResBtns();
     _syncShapeBtns();
+    _syncLabelControlState();
     
     if (isExportMode) {
         _setTileLayer((_styleToLayer[exportMapStyle] || _styleToLayer.voyager)());
@@ -588,6 +632,13 @@ function _syncRouteControlState() {
     document.getElementById('exportRouteDashWrap').classList.toggle('hidden', exportRouteStyle !== 'solid');
     document.getElementById('exportRouteGradientHint').classList.toggle('hidden', exportRouteStyle !== 'gradient');
 }
+function _syncDirectionControlState() {
+    const active = exportShowRoute && exportDirectionMode !== 'none';
+    document.getElementById('exportDirectionControls').style.opacity = exportShowRoute ? '1' : '0.4';
+    document.getElementById('exportDirectionColor').disabled = !active;
+    document.getElementById('exportDirectionDensity').disabled = !active;
+    document.getElementById('exportDirectionSize').disabled = !active;
+}
 function _syncResBtns() {
     document.querySelectorAll('.export-res-btn').forEach(b => {
         b.className = `export-res-btn text-xs font-bold py-1.5 rounded-lg border transition ${parseInt(b.dataset.max) === exportMaxDim ? 'export-active' : 'export-inactive'}`;
@@ -600,6 +651,15 @@ function _syncShapeBtns() {
     document.querySelectorAll('.export-shape-btn').forEach(b => {
         b.className = `export-shape-btn flex-1 py-1.5 text-[11px] font-semibold rounded-lg border transition ${b.dataset.shape === exportPointShape ? 'export-active' : 'export-inactive'}`;
     });
+}
+function _syncLabelControlState() {
+    document.getElementById('exportPointControls').style.opacity = exportPointVis === 'none' ? '0.4' : '1';
+    const labelsActive = exportPointVis !== 'none' && exportShowLabels;
+    document.getElementById('exportLabelSize').disabled = !labelsActive;
+    document.getElementById('exportLabelTextColor').disabled = !labelsActive;
+    document.getElementById('exportLabelBgEnabled').disabled = !labelsActive;
+    document.getElementById('exportLabelBgColor').disabled = !labelsActive || !exportLabelBgEnabled;
+    document.getElementById('exportLabelBgPadding').disabled = !labelsActive || !exportLabelBgEnabled;
 }
 
 // ── Enter / exit export mode ──────────────────────────────────────────
@@ -647,10 +707,11 @@ function enterExportMode() {
     _syncStyleBtns();
     _syncRouteStyleBtns();
     _syncRouteControlState();
+    _syncDirectionControlState();
     _syncResBtns();
     _syncShapeBtns();
     document.getElementById('exportRouteControls').style.opacity = exportShowRoute ? '1' : '0.4';
-    document.getElementById('exportPointControls').style.opacity = exportPointVis === 'none' ? '0.4' : '1';
+    _syncLabelControlState();
     _redrawExportOverlays();
 
     // Fit map so bbox is visible with the right-side panel in mind
@@ -773,6 +834,7 @@ document.querySelectorAll('.export-shape-btn').forEach(btn => btn.addEventListen
 document.getElementById('exportShowRoute').addEventListener('change', e => {
     exportShowRoute = e.target.checked;
     document.getElementById('exportRouteControls').style.opacity = exportShowRoute ? '1' : '0.4';
+    _syncDirectionControlState();
     if (isExportMode) _redrawExportOverlays();
 });
 document.querySelectorAll('.export-route-style-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -803,9 +865,28 @@ document.getElementById('exportRouteDashed').addEventListener('change', e => {
     exportRouteDashed = e.target.checked;
     if (isExportMode) _redrawExportOverlays();
 });
+document.getElementById('exportDirectionMode').addEventListener('change', e => {
+    exportDirectionMode = e.target.value;
+    _syncDirectionControlState();
+    if (isExportMode) _redrawExportOverlays();
+});
+document.getElementById('exportDirectionColor').addEventListener('input', e => {
+    exportDirectionColor = e.target.value;
+    if (isExportMode) _redrawExportOverlays();
+});
+document.getElementById('exportDirectionDensity').addEventListener('input', e => {
+    exportDirectionDensity = parseInt(e.target.value);
+    document.getElementById('exportDirectionDensityVal').textContent = exportDirectionDensity;
+    if (isExportMode) _redrawExportOverlays();
+});
+document.getElementById('exportDirectionSize').addEventListener('input', e => {
+    exportDirectionSize = parseInt(e.target.value);
+    document.getElementById('exportDirectionSizeVal').textContent = exportDirectionSize;
+    if (isExportMode) _redrawExportOverlays();
+});
 document.getElementById('exportPointVisibility').addEventListener('change', e => {
     exportPointVis = e.target.value;
-    document.getElementById('exportPointControls').style.opacity = exportPointVis === 'none' ? '0.4' : '1';
+    _syncLabelControlState();
     if (isExportMode) _redrawExportOverlays();
 });
 document.getElementById('exportPointColor').addEventListener('input', e => {
@@ -824,6 +905,25 @@ document.getElementById('exportLabelSize').addEventListener('input', e => {
 });
 document.getElementById('exportShowLabels').addEventListener('change', e => {
     exportShowLabels = e.target.checked;
+    _syncLabelControlState();
+    if (isExportMode) _redrawExportOverlays();
+});
+document.getElementById('exportLabelTextColor').addEventListener('input', e => {
+    exportLabelTextColor = e.target.value;
+    if (isExportMode) _redrawExportOverlays();
+});
+document.getElementById('exportLabelBgColor').addEventListener('input', e => {
+    exportLabelBgColor = e.target.value;
+    if (isExportMode) _redrawExportOverlays();
+});
+document.getElementById('exportLabelBgPadding').addEventListener('input', e => {
+    exportLabelBgPadding = parseInt(e.target.value);
+    document.getElementById('exportLabelBgPaddingVal').textContent = exportLabelBgPadding;
+    if (isExportMode) _redrawExportOverlays();
+});
+document.getElementById('exportLabelBgEnabled').addEventListener('change', e => {
+    exportLabelBgEnabled = e.target.checked;
+    _syncLabelControlState();
     if (isExportMode) _redrawExportOverlays();
 });
 document.getElementById('exportFormat').addEventListener('change', e => { 
@@ -835,5 +935,7 @@ document.getElementById('exportFormat').addEventListener('change', e => {
 _syncStyleBtns();
 _syncRouteStyleBtns();
 _syncRouteControlState();
+_syncDirectionControlState();
 _syncResBtns();
 _syncShapeBtns();
+_syncLabelControlState();

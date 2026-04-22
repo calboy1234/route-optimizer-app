@@ -218,6 +218,111 @@ def _draw_polyline(
             draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill)
 
 
+def _rotate_points(points: list[tuple[float, float]], angle_rad: float) -> list[tuple[float, float]]:
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    return [
+        (x * cos_a - y * sin_a, x * sin_a + y * cos_a)
+        for x, y in points
+    ]
+
+
+def _translate_points(
+    points: list[tuple[float, float]],
+    origin_x: float,
+    origin_y: float,
+) -> list[tuple[float, float]]:
+    return [(origin_x + x, origin_y + y) for x, y in points]
+
+
+def _sample_route_markers(pts: list[tuple[float, float]], spacing: float) -> list[tuple[float, float, float]]:
+    if len(pts) < 2 or spacing <= 0:
+        return []
+
+    segments: list[tuple[float, float, float, float, float]] = []
+    total_length = 0.0
+    for index in range(len(pts) - 1):
+        x0, y0 = pts[index]
+        x1, y1 = pts[index + 1]
+        length = math.hypot(x1 - x0, y1 - y0)
+        if length < 1e-6:
+            continue
+        segments.append((total_length, x0, y0, x1, y1))
+        total_length += length
+
+    if total_length < spacing * 0.75:
+        return []
+
+    markers = []
+    distance = spacing / 2.0
+    segment_index = 0
+    while distance < total_length and segment_index < len(segments):
+        segment_start, x0, y0, x1, y1 = segments[segment_index]
+        segment_length = math.hypot(x1 - x0, y1 - y0)
+        segment_end = segment_start + segment_length
+        if distance > segment_end:
+            segment_index += 1
+            continue
+
+        progress = (distance - segment_start) / segment_length
+        px = x0 + (x1 - x0) * progress
+        py = y0 + (y1 - y0) * progress
+        angle = math.atan2(y1 - y0, x1 - x0)
+        markers.append((px, py, angle))
+        distance += spacing
+
+    return markers
+
+
+def _draw_direction_marker(
+    draw: ImageDraw.ImageDraw,
+    mode: str,
+    center_x: float,
+    center_y: float,
+    angle: float,
+    size: float,
+    fill: tuple[int, int, int, int],
+) -> None:
+    if mode == "dots":
+        radius = max(1.0, size * 0.32)
+        draw.ellipse(
+            (center_x - radius, center_y - radius, center_x + radius, center_y + radius),
+            fill=fill,
+        )
+        return
+
+    if mode == "arrows":
+        base_shape = [
+            (size * 0.7, 0),
+            (-size * 0.45, -size * 0.4),
+            (-size * 0.15, 0),
+            (-size * 0.45, size * 0.4),
+        ]
+        draw.polygon(_translate_points(_rotate_points(base_shape, angle), center_x, center_y), fill=fill)
+        return
+
+    if mode == "chevrons":
+        chevron = [(size * 0.45, 0), (-size * 0.35, -size * 0.45), (-size * 0.05, 0), (-size * 0.35, size * 0.45)]
+        rotated = _translate_points(_rotate_points(chevron, angle), center_x, center_y)
+        draw.line(rotated[:3], fill=fill, width=max(1, round(size * 0.22)), joint="curve")
+        draw.line(rotated[2:], fill=fill, width=max(1, round(size * 0.22)), joint="curve")
+        return
+
+    if mode == "dashed_arrows":
+        shaft = _translate_points(
+            _rotate_points([(-size * 0.7, 0), (size * 0.15, 0)], angle),
+            center_x,
+            center_y,
+        )
+        draw.line(shaft, fill=fill, width=max(1, round(size * 0.18)))
+        head = [
+            (size * 0.65, 0),
+            (size * 0.1, -size * 0.35),
+            (size * 0.1, size * 0.35),
+        ]
+        draw.polygon(_translate_points(_rotate_points(head, angle), center_x, center_y), fill=fill)
+
+
 def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
     """Stitch tiles, draw route + waypoints, return (image_bytes, content_type)."""
     b = req.bounds
@@ -353,6 +458,24 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
             if last_segment_pts and last_segment_rgba:
                 x, y = last_segment_pts[-1]
                 overlay_draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=last_segment_rgba)
+        if req.direction_mode != "none" and len(merged_pts) >= 2:
+            density = max(10.0, min(100.0, float(req.direction_density)))
+            marker_spacing = max(
+                float(req.direction_size) * overlay_scale * 2.4,
+                (220.0 - (density * 1.6)) * scale_f * overlay_scale,
+            )
+            marker_size = max(6.0 * overlay_scale, float(req.direction_size) * scale_f * overlay_scale)
+            marker_fill = _hex_rgba(req.direction_color, min(1.0, max(req.route_opacity, 0.75)))
+            for center_x, center_y, angle in _sample_route_markers(merged_pts, marker_spacing):
+                _draw_direction_marker(
+                    overlay_draw,
+                    req.direction_mode,
+                    center_x,
+                    center_y,
+                    angle,
+                    marker_size,
+                    marker_fill,
+                )
 
     if req.show_points and req.point_visibility != "none" and req.waypoints:
         wps = req.waypoints
@@ -416,16 +539,22 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
                 label = wp.id if len(wp.id) <= 32 else wp.id[:30] + "…"
                 try:
                     bbox = overlay_draw.textbbox((label_ox, label_oy), label, font=font)
-                    pad_x = 8 * overlay_scale
-                    pad_y = 4 * overlay_scale
-                    overlay_draw.rounded_rectangle(
-                        [bbox[0] - pad_x, bbox[1] - pad_y, bbox[2] + pad_x, bbox[3] + pad_y],
-                        radius=max(4, 6 * overlay_scale),
-                        fill=(255, 255, 255, 230),
-                    )
+                    if req.label_bg_enabled:
+                        pad_x = max(0, round(req.label_bg_padding * overlay_scale))
+                        pad_y = max(0, round(req.label_bg_padding * 0.5 * overlay_scale))
+                        overlay_draw.rounded_rectangle(
+                            [bbox[0] - pad_x, bbox[1] - pad_y, bbox[2] + pad_x, bbox[3] + pad_y],
+                            radius=max(4, 6 * overlay_scale),
+                            fill=_hex_rgba(req.label_bg_color, 0.9),
+                        )
                 except AttributeError:
                     pass
-                overlay_draw.text((label_ox, label_oy), label, font=font, fill=(0, 0, 0, 255))
+                overlay_draw.text(
+                    (label_ox, label_oy),
+                    label,
+                    font=font,
+                    fill=_hex_rgba(req.label_text_color),
+                )
 
     if overlay_scale > 1:
         overlay = overlay.resize((tw, th), Image.LANCZOS)

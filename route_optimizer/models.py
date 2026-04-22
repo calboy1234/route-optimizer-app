@@ -59,6 +59,10 @@ class MapExportRequest(BaseModel):
     route_thickness: float = Field(ge=1.0, le=20.0, default=4.0)
     route_opacity: float = Field(ge=0.0, le=1.0, default=0.85)
     route_dashed: bool = False
+    direction_mode: Literal["none", "arrows", "chevrons", "dashed_arrows", "dots"] = "none"
+    direction_color: str = "#ffffff"
+    direction_density: float = Field(ge=10.0, le=100.0, default=55.0)
+    direction_size: float = Field(ge=6.0, le=40.0, default=16.0)
     route_geometry: list[ExportRoutePoint] = Field(default_factory=list)
     route_segments: list[ExportRouteSegment] = Field(default_factory=list)
     # Points
@@ -69,4 +73,8 @@ class MapExportRequest(BaseModel):
     point_shape: Literal["circle", "pin"] = "circle"
     point_visibility: Literal["all", "start_end", "none"] = "all"
     label_size: float = Field(ge=6.0, le=48.0, default=14.0)
+    label_text_color: str = "#000000"
+    label_bg_color: str = "#ffffff"
+    label_bg_padding: float = Field(ge=0.0, le=24.0, default=8.0)
+    label_bg_enabled: bool = True
     waypoints: list[ExportWaypoint] = Field(default_factory=list)

@@ -186,6 +186,36 @@
                         </div>
                         <p id="exportRouteGradientHint" class="col-span-2 text-[9px] text-slate-400 leading-tight hidden">Gradient colors follow the visit order and use the exact same render for preview and download.</p>
                     </div>
+                    <div id="exportDirectionControls" class="border-t border-slate-100 pt-2">
+                        <div class="flex items-center justify-between">
+                            <p class="text-[9px] font-bold uppercase tracking-wide text-slate-400">Direction Indicators</p>
+                            <span class="text-[9px] text-slate-400">Export only</span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 mt-2">
+                            <div class="col-span-2">
+                                <p class="text-[9px] text-slate-400 mb-1">Mode</p>
+                                <select id="exportDirectionMode" class="compact-input w-full text-[11px]">
+                                    <option value="none">None</option>
+                                    <option value="arrows">Arrows</option>
+                                    <option value="chevrons">Chevrons</option>
+                                    <option value="dashed_arrows">Dashed arrows</option>
+                                    <option value="dots">Dots</option>
+                                </select>
+                            </div>
+                            <div>
+                                <p class="text-[9px] text-slate-400 mb-1">Color</p>
+                                <input id="exportDirectionColor" type="color" value="#ffffff" class="w-full h-7 rounded border border-slate-200 cursor-pointer">
+                            </div>
+                            <div>
+                                <p class="text-[9px] text-slate-400 mb-1">Density: <span id="exportDirectionDensityVal">55</span></p>
+                                <input id="exportDirectionDensity" type="range" min="10" max="100" value="55" class="w-full accent-violet-600">
+                            </div>
+                            <div class="col-span-2">
+                                <p class="text-[9px] text-slate-400 mb-1">Size: <span id="exportDirectionSizeVal">16</span>px</p>
+                                <input id="exportDirectionSize" type="range" min="6" max="40" value="16" class="w-full accent-violet-600">
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Waypoints -->
@@ -222,6 +252,21 @@
                                 <p class="text-[9px] text-slate-400 mb-1">Label Size: <span id="exportLabelSizeVal">14</span>px</p>
                                 <input id="exportLabelSize" type="range" min="6" max="48" value="14" class="w-full accent-violet-600">
                             </div>
+                            <div>
+                                <p class="text-[9px] text-slate-400 mb-1">Text color</p>
+                                <input id="exportLabelTextColor" type="color" value="#000000" class="w-full h-7 rounded border border-slate-200 cursor-pointer">
+                            </div>
+                            <div>
+                                <p class="text-[9px] text-slate-400 mb-1">Background</p>
+                                <input id="exportLabelBgColor" type="color" value="#ffffff" class="w-full h-7 rounded border border-slate-200 cursor-pointer">
+                            </div>
+                            <div>
+                                <p class="text-[9px] text-slate-400 mb-1">Badge padding: <span id="exportLabelBgPaddingVal">8</span>px</p>
+                                <input id="exportLabelBgPadding" type="range" min="0" max="24" value="8" class="w-full accent-violet-600">
+                            </div>
+                            <label class="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer select-none pt-4">
+                                <input id="exportLabelBgEnabled" type="checkbox" checked class="rounded border-slate-300 text-violet-600 w-3 h-3"> Show background
+                            </label>
                             <label class="col-span-2 flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer select-none">
                                 <input id="exportShowLabels" type="checkbox" checked class="rounded border-slate-300 text-violet-600 w-3 h-3"> Show labels
                             </label>
