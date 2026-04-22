@@ -8,6 +8,7 @@ from functools import lru_cache
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageDraw, ImageFont
 
 from route_optimizer.config import INDEX_HTML_PATH, get_settings
@@ -29,6 +30,7 @@ from route_optimizer.solver import (
 
 settings = get_settings()
 app = FastAPI(title="Route Optimizer API")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.allowed_origins),
