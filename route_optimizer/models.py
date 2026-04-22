@@ -50,7 +50,7 @@ class MapExportRequest(BaseModel):
     bounds: ExportBounds
     width: int = Field(ge=256, le=8192, default=2048)
     height: int = Field(ge=256, le=8192, default=2048)
-    format: Literal["png", "jpeg"] = "png"
+    format: Literal["png", "jpeg", "transparent"] = "png"
     map_style: Literal["light", "dark", "voyager", "streets"] = "voyager"
     # Route
     show_route: bool = True

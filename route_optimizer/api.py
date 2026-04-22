@@ -215,19 +215,22 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
 
     cw = (x_max - x_min + 1) * _TILE_PX
     ch = (y_max - y_min + 1) * _TILE_PX
-    canvas = Image.new("RGBA", (cw, ch), (210, 210, 210, 255))
 
-    tile_args = [
-        (req.map_style, x, y, zoom, i)
-        for i, (x, y) in enumerate(
-            (x, y)
-            for x in range(x_min, x_max + 1)
-            for y in range(y_min, y_max + 1)
-        )
-    ]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        for tx, ty, tile in pool.map(_fetch_tile, tile_args):
-            canvas.paste(tile, ((tx - x_min) * _TILE_PX, (ty - y_min) * _TILE_PX))
+    if req.format == "transparent":
+        canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+    else:
+        canvas = Image.new("RGBA", (cw, ch), (210, 210, 210, 255))
+        tile_args = [
+            (req.map_style, x, y, zoom, i)
+            for i, (x, y) in enumerate(
+                (x, y)
+                for x in range(x_min, x_max + 1)
+                for y in range(y_min, y_max + 1)
+            )
+        ]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            for tx, ty, tile in pool.map(_fetch_tile, tile_args):
+                canvas.paste(tile, ((tx - x_min) * _TILE_PX, (ty - y_min) * _TILE_PX))
 
     # Helper: geo → stitched-canvas pixel
     def _c(lat: float, lng: float) -> tuple[float, float]:
@@ -413,6 +416,7 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
     if req.format == "jpeg":
         canvas.convert("RGB").save(out, format="JPEG", quality=92)
         return out.getvalue(), "image/jpeg"
+    
     canvas.save(out, format="PNG")
     return out.getvalue(), "image/png"
 

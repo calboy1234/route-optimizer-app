@@ -13,8 +13,8 @@ let exportRouteOpacity   = 85;       // 0–100 in UI
 let exportRouteDashed    = false;
 let exportPointVis       = 'all';
 let exportPointColor     = '#2563eb';
-let exportPointSize      = 12;
-let exportPointShape     = 'circle';   // 'circle' | 'pin' | future shapes
+let exportPointSize      = 40;
+let exportPointShape     = 'pin';   // 'circle' | 'pin' | future shapes
 let exportLabelSize      = 14;
 let exportShowLabels     = true;
 let _tileLayerBeforeExport = null;
@@ -435,8 +435,30 @@ function _makeExportHandle(type, lat, lng) {
 
 function _refreshBboxRect() {
     if (!exportBboxGroup) return;
+    const { north, south, east, west } = exportBounds;
+    const midLat = (north + south) / 2, midLng = (east + west) / 2;
+
     exportBboxGroup.eachLayer(l => {
-        if (l instanceof L.Rectangle) l.setBounds([[exportBounds.south, exportBounds.west], [exportBounds.north, exportBounds.east]]);
+        if (l instanceof L.Rectangle) {
+            l.setBounds([[south, west], [north, east]]);
+        } else if (l instanceof L.Marker && l.options.type) {
+            // Update handle positions based on their custom 'type' and 'pos' metadata
+            const type = l.options.type;
+            const pos  = l.options.pos;
+            
+            let newLL;
+            if (type === 'center') {
+                newLL = [midLat, midLng];
+            } else if (type === 'corner') {
+                newLL = [pos.includes('n') ? north : south, pos.includes('e') ? east : west];
+            } else if (type === 'edge') {
+                if (pos === 'n') newLL = [north, midLng];
+                else if (pos === 's') newLL = [south, midLng];
+                else if (pos === 'e') newLL = [midLat, east];
+                else if (pos === 'w') newLL = [midLat, west];
+            }
+            if (newLL) l.setLatLng(newLL);
+        }
     });
 }
 
@@ -447,38 +469,43 @@ function drawExportBoundingBox() {
     const midLat = (north + south) / 2, midLng = (east + west) / 2;
 
     exportBboxGroup.addLayer(L.rectangle([[south, west], [north, east]], {
-        color: '#7c3aed', weight: 2, fillColor: '#8b5cf6', fillOpacity: 0.07,
+        color: '#7c3aed', weight: 4, fillColor: '#8b5cf6', fillOpacity: 0.07,
     }));
 
-    // Corners — drag changes two bounds
-    [{ lat: north, lng: west,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat, west: ll.lng }); } },
-     { lat: north, lng: east,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat, east: ll.lng }); } },
-     { lat: south, lng: east,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat, east: ll.lng }); } },
-     { lat: south, lng: west,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat, west: ll.lng }); } }
-    ].forEach(({ lat, lng, fn }) => {
+    // Corners
+    [
+        { id: 'nw', lat: north, lng: west,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat, west: ll.lng }); } },
+        { id: 'ne', lat: north, lng: east,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat, east: ll.lng }); } },
+        { id: 'se', lat: south, lng: east,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat, east: ll.lng }); } },
+        { id: 'sw', lat: south, lng: west,  fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat, west: ll.lng }); } }
+    ].forEach(({ id, lat, lng, fn }) => {
         const h = _makeExportHandle('corner', lat, lng);
+        h.options.type = 'corner'; h.options.pos = id;
         h.on('drag', e => { fn(e.target.getLatLng()); _refreshBboxRect(); _updateBoundsDisplay(); });
         h.on('dragend', () => drawExportBoundingBox());
         h.on('click', e => e.originalEvent && L.DomEvent.stop(e.originalEvent));
         exportBboxGroup.addLayer(h);
     });
 
-    // Edge midpoints — drag changes one bound
-    [{ lat: north,  lng: midLng, fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat }); } },
-     { lat: south,  lng: midLng, fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat }); } },
-     { lat: midLat, lng: east,   fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, east: ll.lng }); } },
-     { lat: midLat, lng: west,   fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, west: ll.lng }); } }
-    ].forEach(({ lat, lng, fn }) => {
+    // Edge midpoints
+    [
+        { id: 'n', lat: north,  lng: midLng, fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, north: ll.lat }); } },
+        { id: 's', lat: south,  lng: midLng, fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, south: ll.lat }); } },
+        { id: 'e', lat: midLat, lng: east,   fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, east: ll.lng }); } },
+        { id: 'w', lat: midLat, lng: west,   fn: ll => { exportBounds = _normalizeExportBounds({ ...exportBounds, west: ll.lng }); } }
+    ].forEach(({ id, lat, lng, fn }) => {
         const h = _makeExportHandle('edge', lat, lng);
+        h.options.type = 'edge'; h.options.pos = id;
         h.on('drag', e => { fn(e.target.getLatLng()); _refreshBboxRect(); _updateBoundsDisplay(); });
         h.on('dragend', () => drawExportBoundingBox());
         h.on('click', e => e.originalEvent && L.DomEvent.stop(e.originalEvent));
         exportBboxGroup.addLayer(h);
     });
 
-    // Center — moves whole box
+    // Center
     let _sb = null, _sll = null;
     const ch = _makeExportHandle('center', midLat, midLng);
+    ch.options.type = 'center';
     ch.on('dragstart', e => { _sb = { ...exportBounds }; _sll = e.target.getLatLng(); });
     ch.on('drag', e => {
         if (!_sb) return;
@@ -725,11 +752,19 @@ document.getElementById('exportPointSize').addEventListener('input', e => {
     document.getElementById('exportPointSizeVal').textContent = exportPointSize;
     if (isExportMode) _redrawExportOverlays();
 });
+document.getElementById('exportLabelSize').addEventListener('input', e => {
+    exportLabelSize = parseInt(e.target.value);
+    document.getElementById('exportLabelSizeVal').textContent = exportLabelSize;
+    if (isExportMode) _redrawExportOverlays();
+});
 document.getElementById('exportShowLabels').addEventListener('change', e => {
     exportShowLabels = e.target.checked;
     if (isExportMode) _redrawExportOverlays();
 });
-document.getElementById('exportFormat').addEventListener('change', e => { exportFormat = e.target.value; });
+document.getElementById('exportFormat').addEventListener('change', e => { 
+    exportFormat = e.target.value;
+    if (isExportMode) _redrawExportOverlays();
+});
 
 // Init button states
 _syncStyleBtns();
