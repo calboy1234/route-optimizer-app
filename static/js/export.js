@@ -15,6 +15,7 @@ let exportPointVis       = 'all';
 let exportPointColor     = '#2563eb';
 let exportPointSize      = 12;
 let exportPointShape     = 'circle';   // 'circle' | 'pin' | future shapes
+let exportLabelSize      = 14;
 let exportShowLabels     = true;
 let _tileLayerBeforeExport = null;
 let _exportPreviewOverlay = null;
@@ -277,6 +278,7 @@ function _buildExportPayload(options = {}) {
         point_size: exportPointSize,
         point_shape: exportPointShape,
         point_visibility: exportPointVis,
+        label_size: exportLabelSize,
         waypoints: wps,
     };
 }

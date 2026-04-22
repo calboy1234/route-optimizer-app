@@ -340,8 +340,8 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
         point_rgba = _hex_rgba(req.point_color)
         start_rgba = (22, 163, 74, 255)
         
-        # Increase font size base for readability
-        font_size = max(14 * overlay_scale, round(18 * scale_f * overlay_scale))
+        # Consistent font size based on overlay_scale and user preference, independent of output resolution
+        font_size = round(req.label_size * overlay_scale)
         font = _load_font(font_size, bold=True)
 
         for i, wp in enumerate(wps):
@@ -353,7 +353,6 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
 
             if req.point_shape == "pin":
                 # Match the SVG teardrop shape from the main UI
-                # Path: M12 1.5C6.2 1.5 1.5 6.2 1.5 12c0 8.2 10.5 22.5 10.5 22.5S22.5 20.2 22.5 12C22.5 6.2 17.8 1.5 12 1.5Z
                 # We'll use a circular top with a triangular bottom for the teardrop look
                 pin_w = marker_r * 1.8
                 pin_h = marker_r * 2.7
@@ -362,20 +361,20 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
                 cw, ch = pin_w + (4 * overlay_scale), pin_h + (4 * overlay_scale)
                 # Drawing a polygon to simulate the teardrop
                 # Top circle part
-                draw.ellipse([(px - cw/2, py - ch + 2), (px + cw/2, py - ch + cw + 2)], fill=(255, 255, 255, 255))
+                overlay_draw.ellipse([(px - cw/2, py - ch + 2), (px + cw/2, py - ch + cw + 2)], fill=(255, 255, 255, 255))
                 # Bottom triangle part
-                draw.polygon([(px - cw/2 + 2, py - ch + cw/2 + 6), (px + cw/2 - 2, py - ch + cw/2 + 6), (px, py + 2)], fill=(255, 255, 255, 255))
+                overlay_draw.polygon([(px - cw/2 + 2, py - ch + cw/2 + 6), (px + cw/2 - 2, py - ch + cw/2 + 6), (px, py + 2)], fill=(255, 255, 255, 255))
                 
                 # Main Color Teardrop
                 # Top circle
-                draw.ellipse([(px - pin_w/2, py - pin_h + 3), (px + pin_w/2, py - pin_h + pin_w + 3)], fill=fill)
+                overlay_draw.ellipse([(px - pin_w/2, py - pin_h + 3), (px + pin_w/2, py - pin_h + pin_w + 3)], fill=fill)
                 # Bottom triangle
-                draw.polygon([(px - pin_w/2 + 1, py - pin_h + pin_w/2 + 5), (px + pin_w/2 - 1, py - pin_h + pin_w/2 + 5), (px, py)], fill=fill)
+                overlay_draw.polygon([(px - pin_w/2 + 1, py - pin_h + pin_w/2 + 5), (px + pin_w/2 - 1, py - pin_h + pin_w/2 + 5), (px, py)], fill=fill)
                 
                 # White inner dot (matching the circle in the SVG)
                 ir = pin_w * 0.2
                 dot_y = py - pin_h + pin_w/2 + 3
-                draw.ellipse([(px - ir, dot_y - ir), (px + ir, dot_y + ir)], fill=(255, 255, 255, 255))
+                overlay_draw.ellipse([(px - ir, dot_y - ir), (px + ir, dot_y + ir)], fill=(255, 255, 255, 255))
                 
                 label_ox, label_oy = px + pin_w/2 + (8 * overlay_scale), py - pin_h + (5 * overlay_scale)
             else:
