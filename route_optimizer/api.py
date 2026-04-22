@@ -335,63 +335,74 @@ def _render_export(req: MapExportRequest) -> tuple[bytes, str]:
         if req.point_visibility == "start_end" and len(wps) > 2:
             wps = [wps[0], wps[-1]]
 
-        marker_r = max(3 * overlay_scale, round(req.point_size * scale_f * 0.55 * overlay_scale))
+        # Increased size multipliers for pins and dots
+        marker_r = max(5 * overlay_scale, round(req.point_size * scale_f * 0.7 * overlay_scale))
         point_rgba = _hex_rgba(req.point_color)
-        start_rgba = (22, 163, 74, 230)
-        font_size = max(10 * overlay_scale, min(32 * overlay_scale, round(13 * scale_f * overlay_scale)))
+        start_rgba = (22, 163, 74, 255)
+        
+        # Increase font size base for readability
+        font_size = max(14 * overlay_scale, round(18 * scale_f * overlay_scale))
         font = _load_font(font_size, bold=True)
 
         for i, wp in enumerate(wps):
             px, py = _oe(wp.lat, wp.lng)
-            if px < -marker_r * 3 or px > (tw * overlay_scale) + marker_r * 3 or py < -marker_r * 3 or py > (th * overlay_scale) + marker_r * 3:
+            if px < -marker_r * 5 or px > (tw * overlay_scale) + marker_r * 5 or py < -marker_r * 5 or py > (th * overlay_scale) + marker_r * 5:
                 continue
 
             fill = start_rgba if i == 0 else point_rgba
 
             if req.point_shape == "pin":
-                pin_r = max(4 * overlay_scale, round(req.point_size * scale_f * 0.7 * overlay_scale))
-                tail_h = max(4 * overlay_scale, round(pin_r * 1.4))
-                cx, cy = int(px), int(py - tail_h)
-
-                overlay_draw.ellipse(
-                    [(cx - pin_r - (2 * overlay_scale), cy - pin_r - (2 * overlay_scale)),
-                     (cx + pin_r + (2 * overlay_scale), cy + pin_r + (2 * overlay_scale))],
-                    fill=(255, 255, 255, 235),
-                )
-                overlay_draw.ellipse([(cx - pin_r, cy - pin_r), (cx + pin_r, cy + pin_r)], fill=fill)
-                overlay_draw.polygon(
-                    [(cx - pin_r // 2, cy + pin_r // 2), (cx + pin_r // 2, cy + pin_r // 2), (int(px), int(py))],
-                    fill=fill,
-                )
-                ir = max(1 * overlay_scale, pin_r // 3)
-                overlay_draw.ellipse([(cx - ir, cy - ir), (cx + ir, cy + ir)], fill=(255, 255, 255, 210))
-                label_ox, label_oy = cx + pin_r + (5 * overlay_scale), cy - pin_r
+                # Match the SVG teardrop shape from the main UI
+                # Path: M12 1.5C6.2 1.5 1.5 6.2 1.5 12c0 8.2 10.5 22.5 10.5 22.5S22.5 20.2 22.5 12C22.5 6.2 17.8 1.5 12 1.5Z
+                # We'll use a circular top with a triangular bottom for the teardrop look
+                pin_w = marker_r * 1.8
+                pin_h = marker_r * 2.7
+                
+                # Casing (White background teardrop)
+                cw, ch = pin_w + (4 * overlay_scale), pin_h + (4 * overlay_scale)
+                # Drawing a polygon to simulate the teardrop
+                # Top circle part
+                draw.ellipse([(px - cw/2, py - ch + 2), (px + cw/2, py - ch + cw + 2)], fill=(255, 255, 255, 255))
+                # Bottom triangle part
+                draw.polygon([(px - cw/2 + 2, py - ch + cw/2 + 6), (px + cw/2 - 2, py - ch + cw/2 + 6), (px, py + 2)], fill=(255, 255, 255, 255))
+                
+                # Main Color Teardrop
+                # Top circle
+                draw.ellipse([(px - pin_w/2, py - pin_h + 3), (px + pin_w/2, py - pin_h + pin_w + 3)], fill=fill)
+                # Bottom triangle
+                draw.polygon([(px - pin_w/2 + 1, py - pin_h + pin_w/2 + 5), (px + pin_w/2 - 1, py - pin_h + pin_w/2 + 5), (px, py)], fill=fill)
+                
+                # White inner dot (matching the circle in the SVG)
+                ir = pin_w * 0.2
+                dot_y = py - pin_h + pin_w/2 + 3
+                draw.ellipse([(px - ir, dot_y - ir), (px + ir, dot_y + ir)], fill=(255, 255, 255, 255))
+                
+                label_ox, label_oy = px + pin_w/2 + (8 * overlay_scale), py - pin_h + (5 * overlay_scale)
             else:
                 overlay_draw.ellipse(
-                    [(px - marker_r - (2 * overlay_scale), py - marker_r - (2 * overlay_scale)),
-                     (px + marker_r + (2 * overlay_scale), py + marker_r + (2 * overlay_scale))],
-                    fill=(255, 255, 255, 235),
+                    [(px - marker_r - (3 * overlay_scale), py - marker_r - (3 * overlay_scale)),
+                     (px + marker_r + (3 * overlay_scale), py + marker_r + (3 * overlay_scale))],
+                    fill=(255, 255, 255, 245),
                 )
                 overlay_draw.ellipse([(px - marker_r, py - marker_r), (px + marker_r, py + marker_r)], fill=fill)
-                ir = max(1 * overlay_scale, marker_r // 3)
-                overlay_draw.ellipse([(px - ir, py - ir), (px + ir, py + ir)], fill=(255, 255, 255, 220))
-                label_ox, label_oy = int(px + marker_r + (5 * overlay_scale)), int(py - marker_r)
+                ir = marker_r * 0.35
+                overlay_draw.ellipse([(px - ir, py - ir), (px + ir, py + ir)], fill=(255, 255, 255, 255))
+                label_ox, label_oy = int(px + marker_r + (8 * overlay_scale)), int(py - marker_r)
 
             if req.show_point_labels and wp.id:
-                label = wp.id if len(wp.id) <= 28 else wp.id[:26] + "…"
+                label = wp.id if len(wp.id) <= 32 else wp.id[:30] + "…"
                 try:
                     bbox = overlay_draw.textbbox((label_ox, label_oy), label, font=font)
-                    pad = 3 * overlay_scale
+                    pad_x = 8 * overlay_scale
+                    pad_y = 4 * overlay_scale
                     overlay_draw.rounded_rectangle(
-                        [bbox[0] - pad, bbox[1] - pad, bbox[2] + pad, bbox[3] + pad],
-                        radius=max(4, 5 * overlay_scale),
-                        fill=(255, 255, 255, 215),
+                        [bbox[0] - pad_x, bbox[1] - pad_y, bbox[2] + pad_x, bbox[3] + pad_y],
+                        radius=max(4, 6 * overlay_scale),
+                        fill=(255, 255, 255, 230),
                     )
                 except AttributeError:
                     pass
-                shadow_offset = max(1, overlay_scale)
-                overlay_draw.text((label_ox + shadow_offset, label_oy + shadow_offset), label, font=font, fill=(0, 0, 0, 90))
-                overlay_draw.text((label_ox, label_oy), label, font=font, fill=(20, 20, 20, 235))
+                overlay_draw.text((label_ox, label_oy), label, font=font, fill=(0, 0, 0, 255))
 
     if overlay_scale > 1:
         overlay = overlay.resize((tw, th), Image.LANCZOS)

@@ -1,7 +1,7 @@
 let isExportMode         = false;
 let exportBounds         = { north: 0, south: 0, east: 0, west: 0 };
 let exportBboxGroup      = null;
-let exportMapStyle       = 'voyager';
+let exportMapStyle       = 'light';
 let exportMaxDim         = 2048;     // max dimension; other dim computed from bbox ratio
 let exportFormat         = 'png';
 let exportShowRoute      = true;
@@ -13,7 +13,7 @@ let exportRouteOpacity   = 85;       // 0–100 in UI
 let exportRouteDashed    = false;
 let exportPointVis       = 'all';
 let exportPointColor     = '#2563eb';
-let exportPointSize      = 9;
+let exportPointSize      = 12;
 let exportPointShape     = 'circle';   // 'circle' | 'pin' | future shapes
 let exportShowLabels     = true;
 let _tileLayerBeforeExport = null;
@@ -294,6 +294,9 @@ async function _renderExportPreview() {
     const controller = new AbortController();
     _exportPreviewAbort = controller;
 
+    const processingEl = document.getElementById('exportProcessing');
+    if (processingEl) processingEl.classList.remove('hidden');
+
     try {
         const blob = await fetchMapExport(_buildExportPayload({ preview: true }), controller.signal);
 
@@ -322,6 +325,7 @@ async function _renderExportPreview() {
     } finally {
         if (_exportPreviewAbort === controller) {
             _exportPreviewAbort = null;
+            if (processingEl) processingEl.classList.add('hidden');
         }
     }
 }
@@ -341,6 +345,56 @@ function _redrawExportOverlays() {
 }
 
 // ── Bounding box editor ───────────────────────────────────────────────
+function resetExportToDefaults() {
+    exportMapStyle = 'light';
+    exportMaxDim = 2048;
+    exportFormat = 'png';
+    exportShowRoute = true;
+    exportRouteStyle = 'solid';
+    exportRouteColor = '#2563eb';
+    exportRouteGradientEnd = '#2563eb';
+    exportRouteThickness = 4;
+    exportRouteOpacity = 85;
+    exportRouteDashed = false;
+    exportPointVis = 'all';
+    exportPointColor = '#2563eb';
+    exportPointSize = 12;
+    exportPointShape = 'circle';
+    exportShowLabels = true;
+
+    // Reset bounds to include everything
+    exportBounds = _computeInitialExportBounds();
+
+    // Sync UI elements
+    document.getElementById('exportShowRoute').checked = true;
+    document.getElementById('exportRouteColor').value = exportRouteColor;
+    document.getElementById('exportRouteGradientEnd').value = exportRouteGradientEnd;
+    document.getElementById('exportRouteThickness').value = exportRouteThickness;
+    document.getElementById('exportRouteThicknessVal').textContent = exportRouteThickness;
+    document.getElementById('exportRouteOpacity').value = exportRouteOpacity;
+    document.getElementById('exportRouteOpacityVal').textContent = exportRouteOpacity;
+    document.getElementById('exportRouteDashed').checked = false;
+    document.getElementById('exportPointVisibility').value = 'all';
+    document.getElementById('exportPointColor').value = exportPointColor;
+    document.getElementById('exportPointSize').value = exportPointSize;
+    document.getElementById('exportPointSizeVal').textContent = exportPointSize;
+    document.getElementById('exportShowLabels').checked = true;
+    document.getElementById('exportFormat').value = 'png';
+    document.getElementById('exportMaxDimInput').value = 2048;
+
+    _syncStyleBtns();
+    _syncRouteStyleBtns();
+    _syncRouteControlState();
+    _syncResBtns();
+    _syncShapeBtns();
+    
+    if (isExportMode) {
+        _setTileLayer((_styleToLayer[exportMapStyle] || _styleToLayer.voyager)());
+        drawExportBoundingBox();
+        _updateBoundsDisplay();
+    }
+}
+
 function _computeInitialExportBounds() {
     const src = drivingPathGeometry.length >= 2 ? drivingPathGeometry
               : optimizedRoute.length           ? optimizedRoute
@@ -587,6 +641,7 @@ async function _doDownload() {
 // ── Event wiring ──────────────────────────────────────────────────────
 document.getElementById('btnExportMap').addEventListener('click', enterExportMode);
 document.getElementById('btnExitExport').addEventListener('click', exitExportMode);
+document.getElementById('btnResetExport').addEventListener('click', resetExportToDefaults);
 document.getElementById('btnDownloadExport').addEventListener('click', _doDownload);
 
 document.querySelectorAll('.export-style-btn').forEach(btn => btn.addEventListener('click', () => {

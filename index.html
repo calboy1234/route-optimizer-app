@@ -114,7 +114,10 @@
                         <p class="text-[9px] font-bold uppercase tracking-[0.3em] text-violet-300">Map Export</p>
                         <h2 class="text-base font-bold leading-tight">Export Image</h2>
                     </div>
-                    <button id="btnExitExport" class="text-[11px] text-violet-300 hover:text-white border border-violet-600 hover:border-violet-400 rounded-lg px-2.5 py-1.5 font-semibold transition shrink-0">Done</button>
+                    <div class="flex gap-2">
+                        <button id="btnResetExport" class="text-[11px] text-violet-300 hover:text-white border border-violet-600 hover:border-violet-400 rounded-lg px-2.5 py-1.5 font-semibold transition shrink-0">Reset</button>
+                        <button id="btnExitExport" class="text-[11px] text-violet-300 hover:text-white border border-violet-600 hover:border-violet-400 rounded-lg px-2.5 py-1.5 font-semibold transition shrink-0">Done</button>
+                    </div>
                 </div>
                 <p class="text-[10px] text-violet-400 mt-1">Drag the purple box to set area. Changes apply live to the map.</p>
             </div>
@@ -261,6 +264,13 @@
         <div id="placementHint" class="absolute top-4 left-1/2 -translate-x-1/2 z-[1000] hidden">
             <div class="bg-slate-900 text-white px-4 py-2 rounded-full shadow-xl text-sm font-medium">
                 Click anywhere on the map to place the next waypoint.
+            </div>
+        </div>
+
+        <div id="exportProcessing" class="absolute top-4 left-1/2 -translate-x-1/2 z-[1200] hidden">
+            <div class="bg-violet-900 text-white px-6 py-2.5 rounded-full shadow-2xl text-sm font-bold flex items-center gap-3 border border-violet-400/30 animate-pulse">
+                <span class="w-2 h-2 rounded-full bg-violet-400 animate-ping"></span>
+                Processing Map Preview...
             </div>
         </div>
 
