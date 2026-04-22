@@ -481,6 +481,10 @@ function enterExportMode() {
     setSidebarCollapsed(true);
     sidebarToggle.style.visibility = 'hidden';
 
+    // Hide result panels if they are open
+    resultPanel.classList.add('hidden');
+    panelToggle.classList.add('hidden');
+
     // Show export panel
     const ep = document.getElementById('exportPanel');
     ep.classList.remove('hidden');

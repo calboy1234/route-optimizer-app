@@ -449,6 +449,10 @@ function renderUI() {
             });
         }
 
+        if (isExportMode) {
+            return;
+        }
+
         const marker = L.marker([point.lat, point.lng], {
             draggable: true,
             opacity: included ? 1 : 0.45,

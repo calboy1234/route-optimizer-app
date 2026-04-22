@@ -67,7 +67,7 @@ const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/
 
 satelliteLayer.addTo(map);
 map.createPane('exportPreviewPane');
-map.getPane('exportPreviewPane').style.zIndex = 350;
+map.getPane('exportPreviewPane').style.zIndex = 650;
 map.getPane('exportPreviewPane').style.pointerEvents = 'none';
 L.control.layers(
     {
@@ -569,6 +569,7 @@ function buildDrivingPathColorSegments(routePoints) {
 }
 
 function drawOptimizedRoute(routePoints) {
+    if (isExportMode) return;
     clearRouteLine();
     if (!showRouteLine || routePoints.length < 2) {
         return;
@@ -586,6 +587,7 @@ function drawOptimizedRoute(routePoints) {
 }
 
 function drawDrivingPath(routePoints = optimizedRoute) {
+    if (isExportMode) return;
     if (drivingPathCasingLine) {
         map.removeLayer(drivingPathCasingLine);
         drivingPathCasingLine = null;
@@ -682,6 +684,7 @@ function drawDrivingPath(routePoints = optimizedRoute) {
 }
 
 function drawSnapLines() {
+    if (isExportMode) return;
     clearSnapLines();
     if (!showSnapGuides) {
         return;
