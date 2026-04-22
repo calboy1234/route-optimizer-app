@@ -24,9 +24,30 @@ let _exportPreviewAbort  = null;
 let _exportPreviewTimer  = null;
 let _exportPreviewSeq    = 0;
 let _exportInteractionState = null;
+let _exportUiState       = null;
+let _isDraggingExportBounds = false;
 const EXPORT_LAT_LIMIT = 85;
 const EXPORT_LNG_LIMIT = 180;
 const EXPORT_MIN_SPAN = 0.0005;
+const EXPORT_PREVIEW_DELAY_MS = 180;
+const EXPORT_DEFAULTS = {
+    mapStyle: 'light',
+    maxDim: 2048,
+    format: 'png',
+    showRoute: true,
+    routeStyle: 'solid',
+    routeColor: '#2563eb',
+    routeGradientEnd: '#2563eb',
+    routeThickness: 4,
+    routeOpacity: 85,
+    routeDashed: false,
+    pointVisibility: 'all',
+    pointColor: '#2563eb',
+    pointSize: 40,
+    pointShape: 'pin',
+    labelSize: 14,
+    showLabels: true,
+};
 
 // ── Tile math — mirrors Python backend exactly ────────────────────────
 function _tileXF(lng, zoom) {
@@ -195,6 +216,20 @@ function _clearExportOverlays() {
     }
 }
 
+function _setExportInteractionActive(active) {
+    _isDraggingExportBounds = active;
+    if (active && _exportPreviewTimer) {
+        clearTimeout(_exportPreviewTimer);
+        _exportPreviewTimer = null;
+    }
+    if (active && _exportPreviewAbort) {
+        _exportPreviewAbort.abort();
+        _exportPreviewAbort = null;
+        const processingEl = document.getElementById('exportProcessing');
+        if (processingEl) processingEl.classList.add('hidden');
+    }
+}
+
 function _computePreviewDims() {
     return _computeExportDims(exportBounds, exportMaxDim);
 }
@@ -332,8 +367,12 @@ async function _renderExportPreview() {
     }
 }
 
-function _redrawExportOverlays() {
+function _redrawExportOverlays(options = {}) {
+    const { force = false } = options;
     if (!isExportMode) {
+        return;
+    }
+    if (_isDraggingExportBounds && !force) {
         return;
     }
 
@@ -343,26 +382,27 @@ function _redrawExportOverlays() {
     _exportPreviewTimer = setTimeout(() => {
         _exportPreviewTimer = null;
         _renderExportPreview();
-    }, 120);
+    }, EXPORT_PREVIEW_DELAY_MS);
 }
 
 // ── Bounding box editor ───────────────────────────────────────────────
 function resetExportToDefaults() {
-    exportMapStyle = 'light';
-    exportMaxDim = 2048;
-    exportFormat = 'png';
-    exportShowRoute = true;
-    exportRouteStyle = 'solid';
-    exportRouteColor = '#2563eb';
-    exportRouteGradientEnd = '#2563eb';
-    exportRouteThickness = 4;
-    exportRouteOpacity = 85;
-    exportRouteDashed = false;
-    exportPointVis = 'all';
-    exportPointColor = '#2563eb';
-    exportPointSize = 12;
-    exportPointShape = 'circle';
-    exportShowLabels = true;
+    exportMapStyle = EXPORT_DEFAULTS.mapStyle;
+    exportMaxDim = EXPORT_DEFAULTS.maxDim;
+    exportFormat = EXPORT_DEFAULTS.format;
+    exportShowRoute = EXPORT_DEFAULTS.showRoute;
+    exportRouteStyle = EXPORT_DEFAULTS.routeStyle;
+    exportRouteColor = EXPORT_DEFAULTS.routeColor;
+    exportRouteGradientEnd = EXPORT_DEFAULTS.routeGradientEnd;
+    exportRouteThickness = EXPORT_DEFAULTS.routeThickness;
+    exportRouteOpacity = EXPORT_DEFAULTS.routeOpacity;
+    exportRouteDashed = EXPORT_DEFAULTS.routeDashed;
+    exportPointVis = EXPORT_DEFAULTS.pointVisibility;
+    exportPointColor = EXPORT_DEFAULTS.pointColor;
+    exportPointSize = EXPORT_DEFAULTS.pointSize;
+    exportPointShape = EXPORT_DEFAULTS.pointShape;
+    exportLabelSize = EXPORT_DEFAULTS.labelSize;
+    exportShowLabels = EXPORT_DEFAULTS.showLabels;
 
     // Reset bounds to include everything
     exportBounds = _computeInitialExportBounds();
@@ -380,9 +420,13 @@ function resetExportToDefaults() {
     document.getElementById('exportPointColor').value = exportPointColor;
     document.getElementById('exportPointSize').value = exportPointSize;
     document.getElementById('exportPointSizeVal').textContent = exportPointSize;
+    document.getElementById('exportLabelSize').value = exportLabelSize;
+    document.getElementById('exportLabelSizeVal').textContent = exportLabelSize;
     document.getElementById('exportShowLabels').checked = true;
-    document.getElementById('exportFormat').value = 'png';
-    document.getElementById('exportMaxDimInput').value = 2048;
+    document.getElementById('exportFormat').value = exportFormat;
+    document.getElementById('exportMaxDimInput').value = exportMaxDim;
+    document.getElementById('exportRouteControls').style.opacity = exportShowRoute ? '1' : '0.4';
+    document.getElementById('exportPointControls').style.opacity = exportPointVis === 'none' ? '0.4' : '1';
 
     _syncStyleBtns();
     _syncRouteStyleBtns();
@@ -411,7 +455,8 @@ function _computeInitialExportBounds() {
     return _normalizeExportBounds({ north: Math.min(85, n + lp), south: Math.max(-85, s - lp), east: Math.min(180, e + lnp), west: Math.max(-180, w - lnp) });
 }
 
-function _updateBoundsDisplay() {
+function _updateBoundsDisplay(options = {}) {
+    const { skipPreview = false } = options;
     const f = v => v.toFixed(5);
     document.getElementById('exportNorth').textContent = f(exportBounds.north);
     document.getElementById('exportSouth').textContent = f(exportBounds.south);
@@ -419,7 +464,7 @@ function _updateBoundsDisplay() {
     document.getElementById('exportWest').textContent  = f(exportBounds.west);
     const { width, height } = _computeExportDims(exportBounds, exportMaxDim);
     document.getElementById('exportDimsDisplay').textContent = `${width} × ${height}`;
-    if (isExportMode) {
+    if (isExportMode && !skipPreview) {
         _redrawExportOverlays();
     }
 }
@@ -429,6 +474,7 @@ function _makeExportHandle(type, lat, lng) {
     return L.marker([lat, lng], {
         draggable: true,
         icon: L.divIcon({ className: '', html: `<span class="export-handle-${type}"></span>`, iconSize: s, iconAnchor: [s[0] / 2, s[1] / 2] }),
+        pane: 'exportBoundingBoxPane',
         keyboard: false, zIndexOffset: 4000,
     });
 }
@@ -469,7 +515,7 @@ function drawExportBoundingBox() {
     const midLat = (north + south) / 2, midLng = (east + west) / 2;
 
     exportBboxGroup.addLayer(L.rectangle([[south, west], [north, east]], {
-        color: '#7c3aed', weight: 4, fillColor: '#8b5cf6', fillOpacity: 0.07,
+        color: '#7c3aed', weight: 4, pane: 'exportBoundingBoxPane', fill: false,
     }));
 
     // Corners
@@ -481,8 +527,9 @@ function drawExportBoundingBox() {
     ].forEach(({ id, lat, lng, fn }) => {
         const h = _makeExportHandle('corner', lat, lng);
         h.options.type = 'corner'; h.options.pos = id;
-        h.on('drag', e => { fn(e.target.getLatLng()); _refreshBboxRect(); _updateBoundsDisplay(); });
-        h.on('dragend', () => drawExportBoundingBox());
+        h.on('dragstart', () => { _setExportInteractionActive(true); });
+        h.on('drag', e => { fn(e.target.getLatLng()); _refreshBboxRect(); _updateBoundsDisplay({ skipPreview: true }); });
+        h.on('dragend', () => { _setExportInteractionActive(false); drawExportBoundingBox(); _updateBoundsDisplay(); });
         h.on('click', e => e.originalEvent && L.DomEvent.stop(e.originalEvent));
         exportBboxGroup.addLayer(h);
     });
@@ -496,8 +543,9 @@ function drawExportBoundingBox() {
     ].forEach(({ id, lat, lng, fn }) => {
         const h = _makeExportHandle('edge', lat, lng);
         h.options.type = 'edge'; h.options.pos = id;
-        h.on('drag', e => { fn(e.target.getLatLng()); _refreshBboxRect(); _updateBoundsDisplay(); });
-        h.on('dragend', () => drawExportBoundingBox());
+        h.on('dragstart', () => { _setExportInteractionActive(true); });
+        h.on('drag', e => { fn(e.target.getLatLng()); _refreshBboxRect(); _updateBoundsDisplay({ skipPreview: true }); });
+        h.on('dragend', () => { _setExportInteractionActive(false); drawExportBoundingBox(); _updateBoundsDisplay(); });
         h.on('click', e => e.originalEvent && L.DomEvent.stop(e.originalEvent));
         exportBboxGroup.addLayer(h);
     });
@@ -506,15 +554,15 @@ function drawExportBoundingBox() {
     let _sb = null, _sll = null;
     const ch = _makeExportHandle('center', midLat, midLng);
     ch.options.type = 'center';
-    ch.on('dragstart', e => { _sb = { ...exportBounds }; _sll = e.target.getLatLng(); });
+    ch.on('dragstart', e => { _setExportInteractionActive(true); _sb = { ...exportBounds }; _sll = e.target.getLatLng(); });
     ch.on('drag', e => {
         if (!_sb) return;
         const ll = e.target.getLatLng();
         const dLat = ll.lat - _sll.lat, dLng = ll.lng - _sll.lng;
         exportBounds = _translateExportBounds(dLat, dLng, _sb);
-        _refreshBboxRect(); _updateBoundsDisplay();
+        _refreshBboxRect(); _updateBoundsDisplay({ skipPreview: true });
     });
-    ch.on('dragend', () => { _sb = null; _sll = null; drawExportBoundingBox(); });
+    ch.on('dragend', () => { _setExportInteractionActive(false); _sb = null; _sll = null; drawExportBoundingBox(); _updateBoundsDisplay(); });
     ch.on('click', e => e.originalEvent && L.DomEvent.stop(e.originalEvent));
     exportBboxGroup.addLayer(ch);
 }
@@ -559,6 +607,11 @@ function enterExportMode() {
     if (isExportMode) return;
     isExportMode = true;
     _suspendEditorModesForExport();
+    _exportUiState = {
+        sidebarCollapsed: isSidebarCollapsed,
+        resultPanelVisible: !resultPanel.classList.contains('hidden'),
+        panelToggleVisible: !panelToggle.classList.contains('hidden'),
+    };
 
     // Collapse sidebar to free map space; hide the sidebar toggle (we control collapse state)
     setSidebarCollapsed(true);
@@ -596,6 +649,8 @@ function enterExportMode() {
     _syncRouteControlState();
     _syncResBtns();
     _syncShapeBtns();
+    document.getElementById('exportRouteControls').style.opacity = exportShowRoute ? '1' : '0.4';
+    document.getElementById('exportPointControls').style.opacity = exportPointVis === 'none' ? '0.4' : '1';
     _redrawExportOverlays();
 
     // Fit map so bbox is visible with the right-side panel in mind
@@ -608,12 +663,13 @@ function enterExportMode() {
 function exitExportMode() {
     if (!isExportMode) return;
     isExportMode = false;
+    _setExportInteractionActive(false);
 
     // Hide export panel, restore sidebar toggle
     const ep = document.getElementById('exportPanel');
     ep.classList.add('hidden');
     ep.style.display = '';
-    setSidebarCollapsed(false);
+    setSidebarCollapsed(_exportUiState ? _exportUiState.sidebarCollapsed : false);
     sidebarToggle.style.visibility = '';
 
     // Remove export layers
@@ -629,6 +685,15 @@ function exitExportMode() {
     if (showRouteLine   && optimizedRoute.length >= 2)      drawOptimizedRoute(optimizedRoute);
     if (showSnapGuides)                                       drawSnapLines();
     _restoreEditorModesAfterExport();
+    if (_exportUiState && hasSummary) {
+        if (_exportUiState.resultPanelVisible) {
+            setResultPanelVisible(true);
+        } else {
+            setResultPanelVisible(false);
+            panelToggle.classList.toggle('hidden', !_exportUiState.panelToggleVisible);
+        }
+    }
+    _exportUiState = null;
 
     resetMapView();
 

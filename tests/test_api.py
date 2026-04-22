@@ -1,6 +1,8 @@
+import io
 from importlib import reload
 
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import route_optimizer.api as api_module
 import route_optimizer.config as config_module
@@ -132,3 +134,62 @@ def test_export_map_returns_502_when_tiles_fail(monkeypatch):
 
     assert response.status_code == 502
     assert response.json()["detail"] == "Tile provider unavailable."
+
+
+def test_export_font_loader_returns_scalable_fonts():
+    api_module._load_font.cache_clear()
+
+    small_font = api_module._load_font(12, bold=True)
+    large_font = api_module._load_font(36, bold=True)
+
+    small_bbox = small_font.getbbox("Waypoint")
+    large_bbox = large_font.getbbox("Waypoint")
+
+    small_width = small_bbox[2] - small_bbox[0]
+    small_height = small_bbox[3] - small_bbox[1]
+    large_width = large_bbox[2] - large_bbox[0]
+    large_height = large_bbox[3] - large_bbox[1]
+
+    assert large_width > small_width
+    assert large_height > small_height
+
+
+def test_export_map_label_size_changes_rendered_output(monkeypatch):
+    client = get_test_client(monkeypatch)
+
+    base_payload = {
+        "bounds": {
+            "north": 49.91,
+            "south": 49.89,
+            "east": -97.09,
+            "west": -97.11,
+        },
+        "width": 512,
+        "height": 512,
+        "format": "transparent",
+        "show_route": False,
+        "show_points": True,
+        "show_point_labels": True,
+        "point_size": 8,
+        "waypoints": [
+            {
+                "lat": 49.9,
+                "lng": -97.1,
+                "id": "Waypoint Label",
+            }
+        ],
+    }
+
+    small_response = client.post("/api/export-map", json={**base_payload, "label_size": 10})
+    large_response = client.post("/api/export-map", json={**base_payload, "label_size": 32})
+
+    assert small_response.status_code == 200
+    assert large_response.status_code == 200
+
+    small_bbox = Image.open(io.BytesIO(small_response.content)).getbbox()
+    large_bbox = Image.open(io.BytesIO(large_response.content)).getbbox()
+
+    assert small_bbox is not None
+    assert large_bbox is not None
+    assert (large_bbox[2] - large_bbox[0]) > (small_bbox[2] - small_bbox[0])
+    assert (large_bbox[3] - large_bbox[1]) >= (small_bbox[3] - small_bbox[1])

@@ -69,6 +69,9 @@ satelliteLayer.addTo(map);
 map.createPane('exportPreviewPane');
 map.getPane('exportPreviewPane').style.zIndex = 650;
 map.getPane('exportPreviewPane').style.pointerEvents = 'none';
+map.createPane('exportBoundingBoxPane');
+map.getPane('exportBoundingBoxPane').style.zIndex = 660;
+map.getPane('exportBoundingBoxPane').style.pointerEvents = 'auto';
 L.control.layers(
     {
         Streets: streetLayer,

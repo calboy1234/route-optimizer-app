@@ -4,6 +4,7 @@ import concurrent.futures
 import io
 import math
 from functools import lru_cache
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -61,17 +62,37 @@ class MapTileFetchError(RuntimeError):
 
 @lru_cache(maxsize=64)
 def _load_font(size: int, *, bold: bool = False):
+    size = max(6, int(round(size)))
     font_names = [
         "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf",
         "Arial Bold.ttf" if bold else "Arial.ttf",
         "arialbd.ttf" if bold else "arial.ttf",
     ]
+    search_paths = [
+        Path.cwd(),
+        Path(ImageFont.__file__).resolve().parent,
+        Path(ImageFont.__file__).resolve().parent / "fonts",
+        Path(__file__).resolve().parent,
+    ]
+
     for font_name in font_names:
+        for base_path in search_paths:
+            font_path = base_path / font_name
+            if not font_path.exists():
+                continue
+            try:
+                return ImageFont.truetype(str(font_path), size=size)
+            except OSError:
+                continue
         try:
             return ImageFont.truetype(font_name, size=size)
         except OSError:
             continue
-    return ImageFont.load_default()
+
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
 
 
 def _tile_y_f(lat: float, zoom: int) -> float:
