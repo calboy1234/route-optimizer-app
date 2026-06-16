@@ -110,6 +110,96 @@ def test_optimize_returns_route_keys_and_road_legs(monkeypatch):
     assert payload["road_legs"] == fake_get_osrm_route_path(None, None)["legs"]
 
 
+def test_optimize_repairs_negative_osrm_matrix_values(monkeypatch):
+    client = get_test_client(monkeypatch, osrm_url="http://osrm.test")
+
+    def fake_get_osrm_matrices(osrm_url, locations):
+        return (
+            [[0, 60], [60, 0]],
+            [[0, -1], [1000, 0]],
+            [{"location": [-97.0, 49.0]}, {"location": [-97.1, 49.1]}],
+        )
+
+    def fake_fetch_osrm_json(url):
+        return {
+            "code": "Ok",
+            "routes": [{
+                "duration": 90,
+                "distance": 1250,
+            }],
+        }
+
+    def fake_get_osrm_route_path(osrm_url, locations):
+        return {
+            "geometry": [
+                {"lat": 49.0, "lng": -97.0},
+                {"lat": 49.1, "lng": -97.1},
+            ],
+            "legs": [[
+                {"lat": 49.0, "lng": -97.0},
+                {"lat": 49.1, "lng": -97.1},
+            ]],
+        }
+
+    monkeypatch.setattr(api_module, "get_osrm_matrices", fake_get_osrm_matrices)
+    monkeypatch.setattr("route_optimizer.solver.fetch_osrm_json", fake_fetch_osrm_json)
+    monkeypatch.setattr(api_module, "get_osrm_route_path", fake_get_osrm_route_path)
+
+    response = client.post(
+        "/api/optimize",
+        json={
+            "locations": [
+                {"id": "A", "route_key": "point-a", "lat": 49.0, "lng": -97.0},
+                {"id": "B", "route_key": "point-b", "lat": 49.1, "lng": -97.1},
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metrics"]["duration_seconds"] == 90
+    assert payload["metrics"]["distance_meters"] == 1250
+    assert payload["routing_debug"]["matrix_repairs"][0]["from_id"] == "A"
+    assert payload["routing_debug"]["matrix_repairs"][0]["to_id"] == "B"
+
+
+def test_optimize_returns_pair_detail_when_negative_repair_fails(monkeypatch):
+    client = get_test_client(monkeypatch, osrm_url="http://osrm.test")
+
+    def fake_get_osrm_matrices(osrm_url, locations):
+        return [[0, 60], [60, 0]], [[0, -1], [1000, 0]], []
+
+    def fake_fetch_osrm_json(url):
+        return {
+            "code": "Ok",
+            "routes": [{
+                "duration": 90,
+                "distance": -1,
+            }],
+        }
+
+    def fake_get_osrm_route_path(osrm_url, locations):
+        raise AssertionError("Route path should not be fetched after repair failure")
+
+    monkeypatch.setattr(api_module, "get_osrm_matrices", fake_get_osrm_matrices)
+    monkeypatch.setattr("route_optimizer.solver.fetch_osrm_json", fake_fetch_osrm_json)
+    monkeypatch.setattr(api_module, "get_osrm_route_path", fake_get_osrm_route_path)
+
+    response = client.post(
+        "/api/optimize",
+        json={
+            "locations": [
+                {"id": "A", "lat": 49.0, "lng": -97.0},
+                {"id": "B", "lat": 49.1, "lng": -97.1},
+            ]
+        },
+    )
+
+    assert response.status_code == 502
+    assert "A -> B" in response.json()["detail"]
+    assert "distance=-1" in response.json()["detail"]
+
+
 def test_export_map_returns_502_when_tiles_fail(monkeypatch):
     client = get_test_client(monkeypatch)
 

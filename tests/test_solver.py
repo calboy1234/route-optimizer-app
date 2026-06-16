@@ -3,9 +3,11 @@ from urllib.parse import parse_qs, urlparse
 from route_optimizer.models import Point
 from route_optimizer.solver import (
     RouteValidationError,
+    UpstreamRoutingError,
     build_locked_blocks,
     get_osrm_matrices,
     get_osrm_route_path,
+    repair_negative_osrm_matrix_values,
     solve_tsp_open,
     validate_cost_matrix,
 )
@@ -115,6 +117,105 @@ def test_get_osrm_matrices_tiles_requests_over_default_table_limit(monkeypatch):
     assert durations[103][0] == 103000
     assert distances[57][78] == 570078
     assert snapped_sources[103]["location"] == [points[103].lng, points[103].lat]
+
+
+def test_repair_negative_osrm_matrix_values_uses_pair_route(monkeypatch):
+    points = [
+        Point(id="A", route_key="point-a", lat=49.0, lng=-97.0),
+        Point(id="B", route_key="point-b", lat=49.1, lng=-97.1),
+    ]
+    requested_urls = []
+
+    def fake_fetch_osrm_json(url):
+        requested_urls.append(url)
+        return {
+            "code": "Ok",
+            "routes": [{
+                "duration": 42.5,
+                "distance": 1200.25,
+            }],
+        }
+
+    monkeypatch.setattr("route_optimizer.solver.fetch_osrm_json", fake_fetch_osrm_json)
+
+    durations, distances, repairs = repair_negative_osrm_matrix_values(
+        "http://osrm.test",
+        points,
+        [[0, 60], [60, 0]],
+        [[0, -1], [1000, 0]],
+    )
+
+    assert len(requested_urls) == 1
+    assert "/route/v1/driving/-97.0,49.0;-97.1,49.1" in requested_urls[0]
+    assert durations[0][1] == 42.5
+    assert distances[0][1] == 1200.25
+    assert repairs == [{
+        "from_id": "A",
+        "to_id": "B",
+        "from_route_key": "point-a",
+        "to_route_key": "point-b",
+        "from": {"lat": 49.0, "lng": -97.0},
+        "to": {"lat": 49.1, "lng": -97.1},
+        "original_duration": 60,
+        "original_distance": -1,
+        "repaired_duration": 42.5,
+        "repaired_distance": 1200.25,
+    }]
+
+
+def test_repair_negative_osrm_matrix_values_fails_with_pair_detail(monkeypatch):
+    points = [
+        Point(id="A", lat=49.0, lng=-97.0),
+        Point(id="B", lat=49.1, lng=-97.1),
+    ]
+
+    def fake_fetch_osrm_json(url):
+        return {
+            "code": "Ok",
+            "routes": [{
+                "duration": 42.5,
+                "distance": -1,
+            }],
+        }
+
+    monkeypatch.setattr("route_optimizer.solver.fetch_osrm_json", fake_fetch_osrm_json)
+
+    try:
+        repair_negative_osrm_matrix_values(
+            "http://osrm.test",
+            points,
+            [[0, 60], [60, 0]],
+            [[0, -1], [1000, 0]],
+        )
+    except UpstreamRoutingError as exc:
+        message = str(exc)
+        assert "A -> B" in message
+        assert "distance=-1" in message
+    else:
+        raise AssertionError("Expected UpstreamRoutingError for failed repair")
+
+
+def test_repair_negative_osrm_matrix_values_skips_valid_matrices(monkeypatch):
+    points = [
+        Point(id="A", lat=49.0, lng=-97.0),
+        Point(id="B", lat=49.1, lng=-97.1),
+    ]
+
+    def fake_fetch_osrm_json(url):
+        raise AssertionError("No pair route should be requested")
+
+    monkeypatch.setattr("route_optimizer.solver.fetch_osrm_json", fake_fetch_osrm_json)
+
+    durations, distances, repairs = repair_negative_osrm_matrix_values(
+        "http://osrm.test",
+        points,
+        [[0, 60], [60, 0]],
+        [[0, 1000], [1000, 0]],
+    )
+
+    assert durations == [[0, 60], [60, 0]]
+    assert distances == [[0, 1000], [1000, 0]]
+    assert repairs == []
 
 
 def test_get_osrm_route_path_merges_leg_step_geometry(monkeypatch):

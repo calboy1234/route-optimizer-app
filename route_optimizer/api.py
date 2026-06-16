@@ -24,6 +24,7 @@ from route_optimizer.solver import (
     get_osrm_matrices,
     get_osrm_route_path,
     normalize_lock_group,
+    repair_negative_osrm_matrix_values,
     solve_tsp_open,
     validate_cost_matrix,
 )
@@ -627,6 +628,14 @@ def optimize_route(request: RouteRequest):
             current_settings.osrm_url,
             request.locations,
         )
+        raw_duration_matrix, raw_distance_matrix, matrix_repairs = (
+            repair_negative_osrm_matrix_values(
+                current_settings.osrm_url,
+                request.locations,
+                raw_duration_matrix,
+                raw_distance_matrix,
+            )
+        )
         duration_matrix = validate_cost_matrix(
             raw_duration_matrix,
             request.locations,
@@ -697,7 +706,7 @@ def optimize_route(request: RouteRequest):
 
         route_path = get_osrm_route_path(current_settings.osrm_url, ordered_points)
 
-        return {
+        response_payload = {
             "status": "success",
             "point_count": len(ordered_locations),
             "optimize_for": request.optimize_for,
@@ -707,6 +716,9 @@ def optimize_route(request: RouteRequest):
             "road_geometry": route_path["geometry"],
             "road_legs": route_path["legs"],
         }
+        if matrix_repairs:
+            response_payload["routing_debug"] = {"matrix_repairs": matrix_repairs}
+        return response_payload
     except RouteValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except UpstreamRoutingError as exc:

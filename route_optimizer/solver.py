@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import requests
@@ -8,6 +9,8 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 from route_optimizer.models import Point
 
 OSRM_TABLE_COORDINATE_LIMIT = 100
+
+logger = logging.getLogger(__name__)
 
 
 class RouteValidationError(ValueError):
@@ -147,6 +150,137 @@ def get_osrm_matrices(osrm_url: str, locations: list[Point]):
                     snapped_sources[source_start + source_offset] = source
 
     return durations, distances, snapped_sources
+
+
+def _clone_matrix_for_repair(
+    matrix: Any,
+    locations: list[Point],
+    label: str,
+) -> list[list[Any]]:
+    point_count = len(locations)
+    if not isinstance(matrix, list) or len(matrix) != point_count:
+        raise UpstreamRoutingError(f"OSRM returned an invalid {label} matrix.")
+
+    cloned_matrix = []
+    for row in matrix:
+        if not isinstance(row, list) or len(row) != point_count:
+            raise UpstreamRoutingError(f"OSRM returned an invalid {label} matrix.")
+        cloned_matrix.append(list(row))
+
+    return cloned_matrix
+
+
+def _matrix_value_as_float(value: Any, label: str) -> float | None:
+    if value is None:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError) as exc:
+        raise UpstreamRoutingError(f"OSRM returned an invalid {label} matrix.") from exc
+
+
+def _negative_matrix_pairs(
+    matrix: list[list[Any]],
+    *,
+    label: str,
+) -> set[tuple[int, int]]:
+    negative_pairs = set()
+    for row_index, row in enumerate(matrix):
+        for column_index, value in enumerate(row):
+            if row_index == column_index or value is None:
+                continue
+
+            numeric_value = _matrix_value_as_float(value, label)
+            if numeric_value is not None and numeric_value < 0:
+                negative_pairs.add((row_index, column_index))
+
+    return negative_pairs
+
+
+def _route_metric_as_float(route: dict[str, Any], label: str) -> float:
+    value = route.get(label)
+    numeric_value = _matrix_value_as_float(value, label)
+    if numeric_value is None or numeric_value < 0:
+        raise UpstreamRoutingError(f"OSRM returned an invalid repair route {label}.")
+    return numeric_value
+
+
+def _point_route_key(point: Point) -> str:
+    return point.route_key or point.id
+
+
+def _point_debug(point: Point) -> dict[str, float]:
+    return {"lat": point.lat, "lng": point.lng}
+
+
+def _format_pair(from_point: Point, to_point: Point) -> str:
+    return f"{from_point.id} -> {to_point.id}"
+
+
+def repair_negative_osrm_matrix_values(
+    osrm_url: str,
+    locations: list[Point],
+    duration_matrix: Any,
+    distance_matrix: Any,
+) -> tuple[list[list[Any]], list[list[Any]], list[dict[str, Any]]]:
+    """Repair impossible negative OSRM table values by routing exact directed pairs."""
+    durations = _clone_matrix_for_repair(duration_matrix, locations, "duration")
+    distances = _clone_matrix_for_repair(distance_matrix, locations, "distance")
+
+    negative_pairs = (
+        _negative_matrix_pairs(durations, label="duration")
+        | _negative_matrix_pairs(distances, label="distance")
+    )
+    if not negative_pairs:
+        return durations, distances, []
+
+    repairs: list[dict[str, Any]] = []
+    for from_index, to_index in sorted(negative_pairs):
+        from_point = locations[from_index]
+        to_point = locations[to_index]
+        pair_label = _format_pair(from_point, to_point)
+        original_duration = durations[from_index][to_index]
+        original_distance = distances[from_index][to_index]
+
+        try:
+            route = _fetch_osrm_route(osrm_url, [from_point, to_point], steps=False)
+            repaired_duration = _route_metric_as_float(route, "duration")
+            repaired_distance = _route_metric_as_float(route, "distance")
+        except UpstreamRoutingError as exc:
+            raise UpstreamRoutingError(
+                "OSRM returned negative matrix values and pair-route repair failed "
+                f"for {pair_label}: duration={original_duration!r}, "
+                f"distance={original_distance!r}. {exc}"
+            ) from exc
+
+        durations[from_index][to_index] = repaired_duration
+        distances[from_index][to_index] = repaired_distance
+
+        repair = {
+            "from_id": from_point.id,
+            "to_id": to_point.id,
+            "from_route_key": _point_route_key(from_point),
+            "to_route_key": _point_route_key(to_point),
+            "from": _point_debug(from_point),
+            "to": _point_debug(to_point),
+            "original_duration": original_duration,
+            "original_distance": original_distance,
+            "repaired_duration": repaired_duration,
+            "repaired_distance": repaired_distance,
+        }
+        repairs.append(repair)
+        logger.warning(
+            "Repaired negative OSRM matrix value for %s: "
+            "duration %r -> %.3f, distance %r -> %.3f",
+            pair_label,
+            original_duration,
+            repaired_duration,
+            original_distance,
+            repaired_distance,
+        )
+
+    return durations, distances, repairs
 
 
 def _coordinates_to_latlngs(coordinates: list[Any]) -> list[dict[str, float]]:

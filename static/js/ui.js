@@ -736,6 +736,9 @@ optimizeBtn.addEventListener('click', async function() {
             });
             drivingPathGeometry = Array.isArray(data.road_geometry) ? data.road_geometry : [];
             drivingPathLegGeometry = Array.isArray(data.road_legs) ? data.road_legs : [];
+            if (data.routing_debug) {
+                console.warn('Routing debug', data.routing_debug);
+            }
             const optimizedPointLookup = new Map(
                 optimizedRoute.map((routePoint) => [routePoint.routeKey, routePoint])
             );
