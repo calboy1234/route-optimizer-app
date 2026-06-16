@@ -7,6 +7,8 @@ from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 from route_optimizer.models import Point
 
+OSRM_TABLE_COORDINATE_LIMIT = 100
+
 
 class RouteValidationError(ValueError):
     """Raised when request data cannot produce a valid route."""
@@ -19,14 +21,24 @@ class UpstreamRoutingError(RuntimeError):
 def fetch_osrm_json(url: str) -> dict[str, Any]:
     try:
         response = requests.get(url, timeout=15)
-        response.raise_for_status()
     except requests.RequestException as exc:
         raise UpstreamRoutingError(f"OSRM request failed: {exc}") from exc
 
     try:
         data = response.json()
     except ValueError as exc:
+        if not response.ok:
+            detail = response.reason or "HTTP error"
+            raise UpstreamRoutingError(
+                f"OSRM request failed ({response.status_code}): {detail}."
+            ) from exc
         raise UpstreamRoutingError("OSRM returned invalid JSON.") from exc
+
+    if not response.ok:
+        message = data.get("message") or data.get("code") or response.reason or "HTTP error"
+        raise UpstreamRoutingError(
+            f"OSRM request failed ({response.status_code}): {message}"
+        )
 
     if data.get("code") not in (None, "Ok"):
         message = data.get("message") or data.get("code") or "Unknown OSRM error"
@@ -35,12 +47,106 @@ def fetch_osrm_json(url: str) -> dict[str, Any]:
     return data
 
 
-def get_osrm_matrices(osrm_url: str, locations: list[Point]):
-    """Fetch travel matrices plus the snapped road coordinates OSRM uses."""
+def _build_table_url(
+    osrm_url: str,
+    locations: list[Point],
+    *,
+    sources: list[int] | None = None,
+    destinations: list[int] | None = None,
+) -> str:
     coords = ";".join(f"{loc.lng},{loc.lat}" for loc in locations)
     url = f"{osrm_url}/table/v1/driving/{coords}?annotations=duration,distance"
-    data = fetch_osrm_json(url)
-    return data.get("durations"), data.get("distances"), data.get("sources", [])
+    if sources is not None:
+        url += f"&sources={';'.join(str(index) for index in sources)}"
+    if destinations is not None:
+        url += f"&destinations={';'.join(str(index) for index in destinations)}"
+    return url
+
+
+def _copy_matrix_tile(
+    target: list[list[Any]],
+    tile: Any,
+    *,
+    source_start: int,
+    destination_start: int,
+    source_count: int,
+    destination_count: int,
+    label: str,
+) -> None:
+    if not isinstance(tile, list) or len(tile) != source_count:
+        raise UpstreamRoutingError(f"OSRM returned an invalid {label} matrix.")
+
+    for source_offset, row in enumerate(tile):
+        if not isinstance(row, list) or len(row) != destination_count:
+            raise UpstreamRoutingError(f"OSRM returned an invalid {label} matrix.")
+        target[source_start + source_offset][
+            destination_start:destination_start + destination_count
+        ] = row
+
+
+def _chunk_ranges(point_count: int, chunk_size: int):
+    for start in range(0, point_count, chunk_size):
+        end = min(start + chunk_size, point_count)
+        yield start, end
+
+
+def get_osrm_matrices(osrm_url: str, locations: list[Point]):
+    """Fetch travel matrices plus the snapped road coordinates OSRM uses."""
+    point_count = len(locations)
+    if point_count <= OSRM_TABLE_COORDINATE_LIMIT:
+        data = fetch_osrm_json(_build_table_url(osrm_url, locations))
+        return data.get("durations"), data.get("distances"), data.get("sources", [])
+
+    chunk_size = max(1, OSRM_TABLE_COORDINATE_LIMIT // 2)
+    durations = [[None for _ in range(point_count)] for _ in range(point_count)]
+    distances = [[None for _ in range(point_count)] for _ in range(point_count)]
+    snapped_sources: list[Any] = [{} for _ in range(point_count)]
+
+    for source_start, source_end in _chunk_ranges(point_count, chunk_size):
+        source_chunk = locations[source_start:source_end]
+        for destination_start, destination_end in _chunk_ranges(point_count, chunk_size):
+            destination_chunk = locations[destination_start:destination_end]
+            table_locations = source_chunk + destination_chunk
+            source_indexes = list(range(len(source_chunk)))
+            destination_indexes = list(
+                range(len(source_chunk), len(source_chunk) + len(destination_chunk))
+            )
+            data = fetch_osrm_json(
+                _build_table_url(
+                    osrm_url,
+                    table_locations,
+                    sources=source_indexes,
+                    destinations=destination_indexes,
+                )
+            )
+
+            _copy_matrix_tile(
+                durations,
+                data.get("durations"),
+                source_start=source_start,
+                destination_start=destination_start,
+                source_count=len(source_chunk),
+                destination_count=len(destination_chunk),
+                label="duration",
+            )
+            _copy_matrix_tile(
+                distances,
+                data.get("distances"),
+                source_start=source_start,
+                destination_start=destination_start,
+                source_count=len(source_chunk),
+                destination_count=len(destination_chunk),
+                label="distance",
+            )
+
+            if destination_start == 0:
+                sources = data.get("sources", [])
+                if not isinstance(sources, list) or len(sources) != len(source_chunk):
+                    raise UpstreamRoutingError("OSRM returned invalid snapped sources.")
+                for source_offset, source in enumerate(sources):
+                    snapped_sources[source_start + source_offset] = source
+
+    return durations, distances, snapped_sources
 
 
 def _coordinates_to_latlngs(coordinates: list[Any]) -> list[dict[str, float]]:
